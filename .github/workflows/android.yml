@@ -53,10 +53,13 @@ jobs:
           path = Path('android/app/src/main/AndroidManifest.xml')
           text = path.read_text()
           permissions = '''    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+              <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
               <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
           '''
           if 'android.permission.READ_MEDIA_VIDEO' not in text:
               text = text.replace('<application', permissions + '\n    <application', 1)
+          elif 'android.permission.READ_MEDIA_VISUAL_USER_SELECTED' not in text:
+              text = text.replace('<application', '    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />\\n    <application', 1)
           path.write_text(text)
           PY
       - name: Resolve dependencies
