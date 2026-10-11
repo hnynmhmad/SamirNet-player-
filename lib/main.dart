@@ -306,6 +306,185 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ])),
       ])))),
       if (locked) Positioned(left: 16, bottom: 32, child: IconButton.filledTonal(onPressed: () { setState(() { locked = false; controls = true; }); SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); }, icon: const Icon(Icons.lock))),
-    ])));
+    ]))));
   }
+}
+
+class VaultScreen extends StatefulWidget {
+  const VaultScreen({super.key});
+  @override
+  State<VaultScreen> createState() => _VaultScreenState();
+}
+
+class _VaultScreenState extends State<VaultScreen> {
+  bool busy = false;
+  List<File> files = [];
+  @override
+  void initState() { super.initState(); _refresh(); }
+  Future<void> _refresh() async {
+    final list = await VaultService.instance.listEncryptedFiles();
+    if (mounted) setState(() => files = list);
+  }
+  Future<String?> _askPin({required String title}) async {
+    final controller = TextEditingController();
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(controller: controller, autofocus: true, obscureText: true,
+          keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'الرقم السري', helperText: 'أدخل 4 أرقام أو أكثر')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('متابعة')),
+        ],
+      ),
+    );
+    controller.dispose();
+    return value;
+  }
+  Future<String?> _ensurePin() async {
+    final service = VaultService.instance;
+    final configured = await service.isConfigured;
+    final pin = await _askPin(title: configured ? 'فتح الخزنة' : 'إنشاء رقم سري للخزنة');
+    if (pin == null || pin.isEmpty) return null;
+    if (configured) {
+      if (!await service.verifyPin(pin)) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('الرقم السري غير صحيح')));
+        return null;
+      }
+    } else {
+      if (pin.length < 4) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('استخدم 4 أرقام أو أكثر')));
+        return null;
+      }
+      await service.setPin(pin);
+    }
+    return pin;
+  }
+  Future<void> _import() async {
+    final pin = await _ensurePin();
+    if (pin == null) return;
+    final picked = await FilePicker.platform.pickFiles(allowMultiple: false);
+    final path = picked?.files.singleOrNull?.path;
+    if (path == null) return;
+    setState(() => busy = true);
+    try {
+      await VaultService.instance.importFile(File(path), pin);
+      await _refresh();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم تشفير الملف ونقله إلى الخزنة')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشفير الملف: $e')));
+    } finally { if (mounted) setState(() => busy = false); }
+  }
+  Future<void> _restore(File file) async {
+    final pin = await _ensurePin();
+    if (pin == null) return;
+    setState(() => busy = true);
+    try {
+      final temp = await VaultService.instance.decryptToTemporary(file, pin);
+      final destination = await FilePicker.platform.saveFile(fileName: 'restored_media.bin');
+      if (destination != null) {
+        await temp.copy(destination);
+        await temp.delete();
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم فك التشفير وحفظ النسخة التي اخترتها')));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر فك التشفير: $e')));
+    } finally { if (mounted) setState(() => busy = false); }
+  }
+  Future<void> _delete(File file) async {
+    final confirm = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('حذف الملف المشفر؟'),
+      content: const Text('سيتم حذف النسخة المشفرة من الخزنة.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('حذف'))],
+    ));
+    if (confirm == true) { await VaultService.instance.delete(file); await _refresh(); }
+  }
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('الخزنة الخاصة')),
+    floatingActionButton: FloatingActionButton.extended(onPressed: busy ? null : _import, icon: const Icon(Icons.add_to_drive), label: const Text('إضافة ملف')),
+    body: busy ? const Center(child: CircularProgressIndicator(color: coral)) : files.isEmpty
+      ? Center(child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.enhanced_encryption, size: 64, color: coral),
+          const SizedBox(height: 16), const Text('خزنتك الخاصة', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8), const Text('تُحفظ الملفات داخل مساحة التطبيق بصيغة مشفرة AES. احفظ رقمك السري؛ لا توجد طريقة لاستعادة الملفات بدونه.', textAlign: TextAlign.center),
+          const SizedBox(height: 16), FilledButton.icon(onPressed: _import, icon: const Icon(Icons.add), label: const Text('تشفير ملف وإضافته')),
+        ]))
+      : ListView(padding: const EdgeInsets.all(16), children: [
+          const Text('الملفات المشفرة', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          ...files.map((file) => Card(child: ListTile(
+            leading: const CircleAvatar(backgroundColor: Color(0x1AEF4444), child: Icon(Icons.lock, color: coral)),
+            title: Text('ملف خاص ${files.indexOf(file) + 1}'),
+            subtitle: Text('${(file.lengthSync() / 1024).toStringAsFixed(1)} كيلوبايت · مشفر'),
+            onTap: () => _restore(file),
+            trailing: PopupMenuButton<String>(onSelected: (v) => v == 'restore' ? _restore(file) : _delete(file), itemBuilder: (_) => const [
+              PopupMenuItem(value: 'restore', child: Text('فك التشفير / استعادة')),
+              PopupMenuItem(value: 'delete', child: Text('حذف نهائي')),
+            ]),
+          ))),
+          const SizedBox(height: 90),
+        ]),
+  );
+}
+
+class WifiTransferScreen extends StatefulWidget {
+  const WifiTransferScreen({super.key});
+  @override
+  State<WifiTransferScreen> createState() => _WifiTransferScreenState();
+}
+
+class _WifiTransferScreenState extends State<WifiTransferScreen> {
+  final WifiTransferService service = WifiTransferService();
+  bool busy = false;
+  List<String> addresses = [];
+  String? error;
+  Future<void> _start() async {
+    setState(() { busy = true; error = null; });
+    try {
+      await service.start();
+      addresses = await service.localIpv4Addresses;
+      if (addresses.isEmpty) error = 'لم يتم العثور على عنوان شبكة محلية. تأكد من اتصال الهاتف بشبكة Wi-Fi.';
+    } catch (e) { error = 'تعذر بدء خادم النقل: $e'; }
+    if (mounted) setState(() => busy = false);
+  }
+  Future<void> _stop() async {
+    setState(() => busy = true);
+    await service.stop();
+    if (mounted) setState(() { busy = false; addresses = []; });
+  }
+  @override
+  void dispose() { service.stop(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('نقل الملفات عبر Wi-Fi')),
+    body: ListView(padding: const EdgeInsets.all(18), children: [
+      Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(22)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Icon(Icons.wifi_tethering, size: 42, color: coral),
+        const SizedBox(height: 12),
+        Text(service.isRunning ? 'الخادم يعمل' : 'استقبال ملفات من جهاز آخر', style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        const Text('صل الجهازان بشبكة Wi-Fi نفسها. يتطلب الإرسال طلب HTTP مع رمز المصادقة، وتُعرض بصمة SHA-256 بعد حفظ الملف. أوقف الخادم بعد الانتهاء.'),
+        const SizedBox(height: 16),
+        if (service.isRunning) ...[
+          const Text('عنوان الخادم', style: TextStyle(fontWeight: FontWeight.bold)),
+          ...addresses.map((ip) => SelectableText('http://$ip:${service.port}')),
+          const SizedBox(height: 12),
+          const Text('رمز المصادقة (خاص بك)', style: TextStyle(fontWeight: FontWeight.bold)),
+          SelectableText(service.token ?? ''),
+          const SizedBox(height: 12),
+          const Text('نقطة استقبال: POST /upload?name=filename.mp4\nالترويسة: Authorization: Bearer TOKEN', style: TextStyle(fontSize: 12)),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(onPressed: busy ? null : _stop, icon: const Icon(Icons.stop_circle_outlined), label: const Text('إيقاف الاستقبال')),
+        ] else FilledButton.icon(onPressed: busy ? null : _start, icon: const Icon(Icons.play_arrow), label: const Text('بدء استقبال الملفات')),
+        if (busy) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
+        if (error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(error!, style: const TextStyle(color: coral))),
+      ])),
+      const SizedBox(height: 16),
+      const ListTile(leading: Icon(Icons.verified_user_outlined), title: Text('حماية برمز عشوائي'), subtitle: Text('الطلبات التي لا تحمل رمز المصادقة تُرفض.')),
+      const ListTile(leading: Icon(Icons.fingerprint), title: Text('فحص سلامة الملف'), subtitle: Text('يُرجع الخادم حجم الملف وبصمة SHA-256 بعد استلامه.')),
+      const ListTile(leading: Icon(Icons.folder_outlined), title: Text('مكان الملفات المستلمة'), subtitle: Text('داخل مساحة التطبيق الخاصة، مجلد wifi_received.')),
+    ]),
+  );
 }
