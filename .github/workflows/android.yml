@@ -54,7 +54,7 @@ jobs:
                   continue
               for path in root.glob('volume_controller-*/android/build.gradle*'):
                   text = path.read_text()
-                  updated = re.sub(r"(jvmTarget\\s*=\\s*['\"])1\\.8(['\"])", r"\\g<1>11\\g<2>", text)
+                  updated = re.sub(r"(jvmTarget\s*=\s*['"])1\.8(['"])", r"\g<1>11\g<2>", text)
                   if updated != text:
                       path.write_text(updated)
                       matches.append(str(path))
