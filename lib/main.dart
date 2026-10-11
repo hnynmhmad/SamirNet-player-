@@ -310,7 +310,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_brightnessGesture) {
       ScreenBrightness().current.then((v) => _startLevel = v);
     } else {
-      VolumeController.instance.getVolume().then((v) => _startLevel = v);
+      VolumeController().getVolume().then((v) => _startLevel = v);
     }
   }
   void _gestureUpdate(DragUpdateDetails d) {
@@ -318,7 +318,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (start == null) return;
     final level = (_startLevel + (start.dy - d.localPosition.dy) / MediaQuery.sizeOf(context).height * 2).clamp(0.0, 1.0);
     if (_brightnessGesture) { ScreenBrightness().setScreenBrightness(level); }
-    else { VolumeController.instance.setVolume(level); }
+    else { VolumeController().setVolume(level); }
   }
   Future<void> _toggleFullscreen() async {
     final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
@@ -445,7 +445,9 @@ class _VaultScreenState extends State<VaultScreen> {
     setState(() => busy = true);
     try {
       final temp = await VaultService.instance.decryptToTemporary(file, pin);
-      final meta = await VaultService.instance.metadataFor(file);\n      final originalName = meta['name'] as String? ?? 'restored_media.bin';\n      final destination = await FilePicker.platform.saveFile(fileName: originalName);
+      final meta = await VaultService.instance.metadataFor(file);
+      final originalName = meta['name'] as String? ?? 'restored_media.bin';
+      final destination = await FilePicker.platform.saveFile(fileName: originalName);
       if (destination != null) {
         await temp.copy(destination);
         await temp.delete();
@@ -537,8 +539,7 @@ class _WifiTransferScreenState extends State<WifiTransferScreen> {
           const Text('رمز المصادقة (خاص بك)', style: TextStyle(fontWeight: FontWeight.bold)),
           SelectableText(service.token ?? ''),
           const SizedBox(height: 12),
-          const Text('نقطة استقبال: POST /upload?name=filename.mp4
-الترويسة: Authorization: Bearer TOKEN', style: TextStyle(fontSize: 12)),
+          const Text('نقطة استقبال: POST /upload?name=filename.mp4\\nالترويسة: Authorization: Bearer TOKEN', style: TextStyle(fontSize: 12)),
           const SizedBox(height: 12),
           OutlinedButton.icon(onPressed: busy ? null : _stop, icon: const Icon(Icons.stop_circle_outlined), label: const Text('إيقاف الاستقبال')),
         ] else FilledButton.icon(onPressed: busy ? null : _start, icon: const Icon(Icons.play_arrow), label: const Text('بدء استقبال الملفات')),
