@@ -148,7 +148,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return RefreshIndicator(onRefresh: _scan, child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
       SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(['الرئيسية', 'المجلدات', 'المفضلة', 'السجل'][tab], style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 4), Text(videos.length.toString() + ' فيديو على الجهاز', style: const TextStyle(color: Colors.grey)),
+        const SizedBox(height: 4), Text('${videos.length} فيديو على الجهاز', style: const TextStyle(color: Colors.grey)),
         const SizedBox(height: 16),
         TextField(controller: search, onChanged: (v) => setState(() => query = v), decoration: InputDecoration(hintText: 'ابحث عن فيديو...', prefixIcon: const Icon(Icons.search), filled: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none))),
         const SizedBox(height: 12),
@@ -189,7 +189,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       const Text('المجلدات', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
       const SizedBox(height: 12),
       if (groups.isEmpty) const Text('لا توجد مجلدات فيديو متاحة'),
-      ...groups.entries.map((e) => Card(child: ExpansionTile(leading: const Icon(Icons.folder, color: coral), title: Text(e.key.isEmpty ? 'المجلد الرئيسي' : e.key), subtitle: Text(e.value.length.toString() + ' فيديو'), children: e.value.map((v) => ListTile(title: Text(v.name), leading: const Icon(Icons.movie_outlined), onTap: () => _play(v))).toList()))),
+      ...groups.entries.map((e) => Card(child: ExpansionTile(leading: const Icon(Icons.folder, color: coral), title: Text(e.key.isEmpty ? 'المجلد الرئيسي' : e.key), subtitle: Text('${e.value.length} فيديو'), children: e.value.map((v) => ListTile(title: Text(v.name), leading: const Icon(Icons.movie_outlined), onTap: () => _play(v))).toList()))),
     ]);
   }
   Widget _settings() => ListView(padding: const EdgeInsets.all(16), children: [
@@ -221,7 +221,7 @@ class PlayerScreen extends StatefulWidget {
 }
 class _PlayerScreenState extends State<PlayerScreen> {
   late final VideoPlayerController controller;
-  bool ready = false, controls = true, locked = false, fillScreen = false;
+  bool ready = false, controls = true, locked = false, fillScreen = false;\n  String? subtitleText;\n  Duration subtitleOffset = Duration.zero;\n  double? subtitleSize;\n  Offset? _gestureStart;\n  double _startLevel = .5;\n  bool _brightnessGesture = false;
   Timer? _hideTimer;
   DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
   @override
@@ -282,16 +282,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final v = controller.value;
-    return Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, child: Stack(alignment: Alignment.center, children: [
+    return Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, onVerticalDragStart: locked ? null : _gestureStartAt, onVerticalDragUpdate: locked ? null : _gestureUpdate, onVerticalDragEnd: (_) => _gestureStart = null, child: Stack(alignment: Alignment.center, children: [
       if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: VideoPlayer(controller)))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: VideoPlayer(controller))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
-      if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
+      if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),\n      if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
         Row(children: [IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)), Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))), IconButton(onPressed: widget.onFavorite, icon: Icon(widget.favorite ? Icons.favorite : Icons.favorite_border, color: coral)), PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
           if (value.startsWith('speed:')) controller.setPlaybackSpeed(double.parse(value.substring(6)));
           if (value == 'fit') setState(() => fillScreen = !fillScreen);
-          if (value == 'rotate') _toggleFullscreen();
+          if (value == 'rotate') _toggleFullscreen();\n          if (value == 'subtitle') _loadSubtitle();\n          if (value == 'subminus') setState(() => subtitleOffset -= const Duration(milliseconds: 500));\n          if (value == 'subplus') setState(() => subtitleOffset += const Duration(milliseconds: 500));\n          if (value == 'subsize') setState(() => subtitleSize = (subtitleSize ?? 22) >= 30 ? 16 : (subtitleSize ?? 22) + 2);
         }, itemBuilder: (_) => [
           const PopupMenuItem(value: 'fit', child: Text('تبديل ملء الشاشة / احتواء')),
-          const PopupMenuItem(value: 'rotate', child: Text('تدوير الشاشة')),
+          const PopupMenuItem(value: 'rotate', child: Text('تدوير الشاشة')),\n          const PopupMenuItem(value: 'subtitle', child: Text('اختيار ملف ترجمة')),\n          const PopupMenuItem(value: 'subminus', child: Text('تأخير الترجمة -0.5 ثانية')),\n          const PopupMenuItem(value: 'subplus', child: Text('تقديم الترجمة +0.5 ثانية')),\n          const PopupMenuItem(value: 'subsize', child: Text('تكبير / تصغير الترجمة')),
           const PopupMenuDivider(),
           ...[0.5, .75, 1.0, 1.25, 1.5, 2.0].map((s) => PopupMenuItem(value: 'speed:$s', child: Text('سرعة $s×'))),
         ])]),
