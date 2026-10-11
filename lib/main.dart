@@ -72,6 +72,7 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryScreenState extends State<LibraryScreen> {
   int tab = 0, filter = 0;
   bool loading = true, denied = false, grid = true;
+  String? scanError;
   String query = '';
   final search = TextEditingController();
   List<MediaEntry> videos = [];
@@ -87,17 +88,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
     setState(() { favorites = (p.getStringList('favorites') ?? []).toSet(); history = p.getStringList('history') ?? []; });
   }
   Future<void> _scan() async {
-    if (mounted) setState(() { loading = true; denied = false; });
+    if (mounted) setState(() { loading = true; denied = false; scanError = null; });
     try {
       final permission = await PhotoManager.requestPermissionExtend();
       if (!permission.isAuth && !permission.hasAccess) {
-        if (mounted) setState(() { denied = true; loading = false; });
+        if (mounted) setState(() { denied = true; loading = false; scanError = 'لم يمنح Android التطبيق صلاحية قراءة الفيديوهات. افتح إعدادات التطبيق ثم الأذونات وتأكد من السماح بالصور والفيديوهات.'; });
         return;
       }
       final paths = await PhotoManager.getAssetPathList(type: RequestType.video, onlyAll: true);
       final assets = paths.isEmpty ? <AssetEntity>[] : await paths.first.getAssetListRange(start: 0, end: 1000);
-      if (mounted) setState(() { videos = assets.map(MediaEntry.new).toList(); loading = false; });
-    } catch (_) { if (mounted) setState(() => loading = false); }
+      if (mounted) setState(() { videos = assets.map(MediaEntry.new).toList(); loading = false; denied = false; scanError = null; });
+    } catch (error, stack) {
+      debugPrint('SamirNet media scan failed: $error\\n$stack');
+      if (mounted) setState(() { loading = false; denied = false; scanError = 'تعذر فحص مكتبة الفيديوهات: $error'; });
+    }
   }
   List<MediaEntry> get shown {
     Iterable<MediaEntry> list = videos;
@@ -162,8 +166,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (tab == 0 && history.isNotEmpty) const Text('متابعة المشاهدة', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
       ]))),
       if (loading) const SliverFillRemaining(child: Center(child: CircularProgressIndicator(color: coral)))
-      else if (denied) SliverFillRemaining(hasScrollBody: false, child: _empty(Icons.perm_media_outlined, 'نحتاج إلى إذن الوصول للوسائط', 'اسمح بالوصول إلى الفيديوهات المحلية.', 'إعادة المحاولة', _scan))
-      else if (items.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _empty(Icons.video_library_outlined, query.isNotEmpty ? 'لا توجد نتائج' : 'لم نعثر على فيديوهات', 'أضف فيديو إلى الهاتف ثم حدّث المكتبة.', 'تحديث المكتبة', _scan))
+      else if (denied) SliverFillRemaining(hasScrollBody: false, child: _empty(Icons.perm_media_outlined, 'نحتاج إلى إذن الوصول للوسائط', scanError ?? 'اسمح بالوصول إلى الفيديوهات المحلية من إعدادات التطبيق.', 'إعادة المحاولة', _scan))
+      else if (scanError != null) SliverFillRemaining(hasScrollBody: false, child: _empty(Icons.error_outline, 'تعذر تحميل مكتبة الوسائط', scanError!, 'إعادة المحاولة', _scan))
+      else if (items.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _empty(Icons.video_library_outlined, query.isNotEmpty ? 'لا توجد نتائج' : 'لم نعثر على فيديوهات', 'لم يعثر فهرس Android على فيديوهات يمكن للتطبيق الوصول إليها. جرّب تحديث المكتبة.', 'تحديث المكتبة', _scan))
       else if (grid) SliverPadding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 24), sliver: SliverGrid(delegate: SliverChildBuilderDelegate((context, i) => _videoCard(items[i], true), childCount: items.length), gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 240, crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: .78)))
       else SliverPadding(padding: const EdgeInsets.all(16), sliver: SliverList(delegate: SliverChildBuilderDelegate((context, i) => Padding(padding: const EdgeInsets.only(bottom: 8), child: _videoCard(items[i], false)), childCount: items.length))),
     ]));
