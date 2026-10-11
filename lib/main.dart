@@ -87,6 +87,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (!mounted) return;
     setState(() { favorites = (p.getStringList('favorites') ?? []).toSet(); history = p.getStringList('history') ?? []; });
   }
+  Future<void> _openPermissionSettings() async {
+    try {
+      await PhotoManager.openSetting();
+    } catch (error) {
+      if (mounted) _toast('تعذر فتح إعدادات الأذونات: $error');
+    }
+  }
   Future<void> _scan() async {
     if (mounted) setState(() { loading = true; denied = false; scanError = null; });
     try {
@@ -166,7 +173,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (tab == 0 && history.isNotEmpty) const Text('متابعة المشاهدة', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
       ]))),
       if (loading) const SliverFillRemaining(child: Center(child: CircularProgressIndicator(color: coral)))
-      else if (denied) SliverFillRemaining(hasScrollBody: false, child: _empty(Icons.perm_media_outlined, 'نحتاج إلى إذن الوصول للوسائط', scanError ?? 'اسمح بالوصول إلى الفيديوهات المحلية من إعدادات التطبيق.', 'إعادة المحاولة', _scan))
+      else if (denied) SliverFillRemaining(hasScrollBody: false, child: _empty(Icons.perm_media_outlined, 'نحتاج إلى إذن الوصول للوسائط', scanError ?? 'اسمح بالوصول إلى الصور والفيديوهات من إعدادات التطبيق، ثم ارجع واضغط إعادة المحاولة.', 'فتح إعدادات الأذونات', _openPermissionSettings))
       else if (scanError != null) SliverFillRemaining(hasScrollBody: false, child: _empty(Icons.error_outline, 'تعذر تحميل مكتبة الوسائط', scanError!, 'إعادة المحاولة', _scan))
       else if (items.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _empty(Icons.video_library_outlined, query.isNotEmpty ? 'لا توجد نتائج' : 'لم نعثر على فيديوهات', 'لم يعثر فهرس Android على فيديوهات يمكن للتطبيق الوصول إليها. جرّب تحديث المكتبة.', 'تحديث المكتبة', _scan))
       else if (grid) SliverPadding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 24), sliver: SliverGrid(delegate: SliverChildBuilderDelegate((context, i) => _videoCard(items[i], true), childCount: items.length), gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 240, crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: .78)))
