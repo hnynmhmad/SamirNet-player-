@@ -82,18 +82,18 @@ jobs:
           # Normalize every plugin compileSdk declaration, not only the first plugin
           # that happens to fail AAR metadata checks.
           declaration = re.compile(
-              r'(?m)^(\\s*compileSdk(?:Version)?\\s*(?:=\\s*)?)(flutter\\.compileSdkVersion|[0-9]+)(\\s*(?:\\/\/.*)?)$'
+              r'(?m)^(\s*compileSdk(?:Version)?\s*(?:=\s*)?)(flutter\.compileSdkVersion|[0-9]+)(\s*(?:\/\/.*)?)$'
           )
           for gradle in gradle_files:
               original = gradle.read_text()
-              updated, count = declaration.subn(r'\\g<1>36\\g<3>', original)
+              updated, count = declaration.subn(r'\g<1>36\g<3>', original)
               if count:
                   gradle.write_text(updated)
                   updated_files.append(str(gradle))
               final = gradle.read_text()
-              if re.search(r'(?m)^\\s*compileSdk(?:Version)?\\s*(?:=\\s*)?[^\\n]+', final):
+              if re.search(r'(?m)^\s*compileSdk(?:Version)?\s*(?:=\s*)?[^\n]+', final):
                   compile_sdk_files.append(str(gradle))
-                  if not re.search(r'(?m)^\\s*compileSdk(?:Version)?\\s*(?:=\\s*)?36\\s*(?:\\/\/.*)?$', final):
+                  if not re.search(r'(?m)^\s*compileSdk(?:Version)?\s*(?:=\s*)?36\s*(?:\/\/.*)?$', final):
                       unsupported.append(str(gradle))
 
           if unsupported:
