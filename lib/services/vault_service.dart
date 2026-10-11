@@ -60,11 +60,14 @@ class VaultService {
     final iv = enc.IV(Uint8List.fromList(ivBytes));
     final encrypter = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc));
     final encrypted = encrypter.encryptBytes(bytes, iv: iv).bytes;
+    final macKey = sha256.convert([...utf8.encode('$pin:mac:'), ...salt]).bytes;
+    final mac = Hmac(sha256, macKey).convert([...salt, ...ivBytes, ...encrypted]).bytes;
     final output = BytesBuilder()
-      ..add([83, 78, 86, 49]) // SNV1 format marker
+      ..add([83, 78, 86, 50]) // SNV2 format marker with authentication tag
       ..add(salt)
       ..add(ivBytes)
-      ..add(encrypted);
+      ..add(encrypted)
+      ..add(mac);
     final safeName = DateTime.now().microsecondsSinceEpoch.toString() + '.snv';
     await File('${(await _directory()).path}/$safeName')
         .writeAsBytes(output.takeBytes(), flush: true);
@@ -80,13 +83,19 @@ class VaultService {
   Future<File> decryptToTemporary(File encryptedFile, String pin) async {
     if (!await verifyPin(pin)) throw StateError('الرقم السري غير صحيح');
     final all = await encryptedFile.readAsBytes();
-    if (all.length < 36 || all[0] != 83 || all[1] != 78 ||
-        all[2] != 86 || all[3] != 49) {
+    if (all.length < 68 || all[0] != 83 || all[1] != 78 ||
+        all[2] != 86 || all[3] != 50) {
       throw const FormatException('ملف الخزنة تالف أو غير معروف');
     }
     final salt = all.sublist(4, 20);
     final iv = enc.IV(Uint8List.fromList(all.sublist(20, 36)));
-    final payload = all.sublist(36);
+    final payload = all.sublist(36, all.length - 32);
+    final suppliedMac = all.sublist(all.length - 32);
+    final macKey = sha256.convert([...utf8.encode('$pin:mac:'), ...salt]).bytes;
+    final expectedMac = Hmac(sha256, macKey).convert([...salt, ...all.sublist(20, 36), ...payload]).bytes;
+    var mismatch = 0;
+    for (var i = 0; i < 32; i++) { mismatch |= suppliedMac[i] ^ expectedMac[i]; }
+    if (mismatch != 0) throw const FormatException('فشل التحقق من سلامة الملف أو الرقم السري');
     final key = enc.Key(_deriveKey(pin, salt));
     final decrypted = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc))
         .decryptBytes(enc.Encrypted(Uint8List.fromList(payload)), iv: iv);
