@@ -25,6 +25,22 @@ jobs:
           cache: true
       - name: Generate Android platform files
         run: flutter create --platforms=android --org com.samirnet .
+      - name: Align Kotlin and Java JVM targets
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          candidates = [Path('android/build.gradle.kts'), Path('android/build.gradle')]
+          root = next((p for p in candidates if p.exists()), None)
+          if root is None:
+              raise SystemExit('Android root Gradle build file was not generated')
+          text = root.read_text()
+          marker = '// SamirNet: align Kotlin JVM target for all plugins'
+          if marker not in text:
+              text += '\n\n' + marker + '\nsubprojects {\n    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {\n        kotlinOptions.jvmTarget = "11"\n    }\n}\n'
+              root.write_text(text)
+          print(f'Configured Kotlin JVM target in {root}')
+          PY
       - name: Configure Android media permissions
         shell: bash
         run: |
