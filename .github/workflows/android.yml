@@ -67,7 +67,7 @@ jobs:
                   element = f'    <uses-permission android:name="{permission}" />'
               if '<application' not in text:
                   raise SystemExit('AndroidManifest.xml has no application element')
-              text = text.replace('<application', element + '\\n    <application', 1)
+              text = text.replace('<application', element + '\n    <application', 1)
           path.write_text(text)
           print('Verified Android video media permissions in manifest')
           PY
