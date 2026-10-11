@@ -25,6 +25,20 @@ jobs:
           cache: true
       - name: Generate Android platform files
         run: flutter create --platforms=android --org com.samirnet .
+      - name: Configure Android media permissions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('android/app/src/main/AndroidManifest.xml')
+          text = path.read_text()
+          permissions = '''    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+          '''
+          if 'android.permission.READ_MEDIA_VIDEO' not in text:
+              text = text.replace('<application', permissions + '\n    <application', 1)
+          path.write_text(text)
+          PY
       - name: Resolve dependencies
         run: flutter pub get
       - name: Analyze
