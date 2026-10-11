@@ -122,13 +122,13 @@ jobs:
               original = path.read_text()
               updated = original
               updated = re.sub(
-                  r'''(jvmTarget\\s*=\\s*["'])1\\.8(["'])''',
-                  r'\\g<1>11\\g<2>', updated)
+                  r'''(jvmTarget\s*=\s*["'])1\.8(["'])''',
+                  r'\g<1>11\g<2>', updated)
               updated = re.sub(
-                  r'''(jvmTarget\\s*=\\s*)JavaVersion\\.VERSION_1_8''',
-                  r'\\g<1>JavaVersion.VERSION_11', updated)
+                  r'''(jvmTarget\s*=\s*)JavaVersion\.VERSION_1_8''',
+                  r'\g<1>JavaVersion.VERSION_11', updated)
               updated = re.sub(
-                  r'''(JvmTarget\\.JVM_1_8)''',
+                  r'''(JvmTarget\.JVM_1_8)''',
                   'JvmTarget.JVM_11', updated)
               if updated != original:
                   path.write_text(updated)
