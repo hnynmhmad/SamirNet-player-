@@ -4,3 +4,8 @@ linter:
   rules:
     avoid_print: true
     prefer_final_locals: true
+
+# Keep analyzer output focused on correctness while supporting current Flutter APIs.
+analyzer:
+  errors:
+    deprecated_member_use: ignore
