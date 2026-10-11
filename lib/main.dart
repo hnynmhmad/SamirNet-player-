@@ -223,7 +223,13 @@ class PlayerScreen extends StatefulWidget {
 }
 class _PlayerScreenState extends State<PlayerScreen> {
   late final VideoPlayerController controller;
-  bool ready = false, controls = true, locked = false, fillScreen = false;\n  String? subtitleText;\n  Duration subtitleOffset = Duration.zero;\n  double? subtitleSize;\n  Offset? _gestureStart;\n  double _startLevel = .5;\n  bool _brightnessGesture = false;
+  bool ready = false, controls = true, locked = false, fillScreen = false;
+  String? subtitleText;
+  Duration subtitleOffset = Duration.zero;
+  double? subtitleSize;
+  Offset? _gestureStart;
+  double _startLevel = .5;
+  bool _brightnessGesture = false;
   Timer? _hideTimer;
   DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
   @override
@@ -266,6 +272,54 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() => controls = true);
     _scheduleHide();
   }
+  Future<void> _loadSubtitle() async {
+    final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['srt', 'vtt', 'txt']);
+    final path = picked?.files.singleOrNull?.path;
+    if (path == null) return;
+    try {
+      final text = await File(path).readAsString();
+      if (mounted) setState(() => subtitleText = text);
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذرت قراءة ملف الترجمة')));
+    }
+  }
+  String? _subtitleAt(Duration position) {
+    final raw = subtitleText;
+    if (raw == null) return null;
+    final adjusted = position + subtitleOffset;
+    for (final block in raw.replaceAll('\r', '').split(RegExp(r'\n\s*\n'))) {
+      final lines = block.split('\n').where((line) => line.trim().isNotEmpty).toList();
+      final index = lines.indexWhere((line) => line.contains('-->'));
+      if (index < 0) continue;
+      final times = lines[index].split('-->');
+      if (times.length != 2) continue;
+      Duration parse(String input) {
+        final parts = input.trim().replaceAll(',', '.').split(':');
+        if (parts.length != 3) return Duration.zero;
+        final sec = parts[2].split('.');
+        return Duration(hours: int.tryParse(parts[0]) ?? 0, minutes: int.tryParse(parts[1]) ?? 0, seconds: int.tryParse(sec[0]) ?? 0, milliseconds: sec.length > 1 ? int.tryParse(sec[1].padRight(3, '0').substring(0, 3)) ?? 0 : 0);
+      }
+      if (adjusted >= parse(times[0]) && adjusted <= parse(times[1])) return lines.skip(index + 1).join('\n').replaceAll(RegExp(r'<[^>]*>'), '');
+    }
+    return null;
+  }
+  void _gestureStartAt(DragStartDetails d) {
+    _gestureStart = d.localPosition;
+    _brightnessGesture = d.localPosition.dx < MediaQuery.sizeOf(context).width / 2;
+    _startLevel = .5;
+    if (_brightnessGesture) {
+      ScreenBrightness().current.then((v) => _startLevel = v);
+    } else {
+      VolumeController.instance.getVolume().then((v) => _startLevel = v);
+    }
+  }
+  void _gestureUpdate(DragUpdateDetails d) {
+    final start = _gestureStart;
+    if (start == null) return;
+    final level = (_startLevel + (start.dy - d.localPosition.dy) / MediaQuery.sizeOf(context).height * 2).clamp(0.0, 1.0);
+    if (_brightnessGesture) { ScreenBrightness().setScreenBrightness(level); }
+    else { VolumeController.instance.setVolume(level); }
+  }
   Future<void> _toggleFullscreen() async {
     final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
     await SystemChrome.setPreferredOrientations(landscape ? [DeviceOrientation.portraitUp] : [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
@@ -286,14 +340,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final v = controller.value;
     return Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, onVerticalDragStart: locked ? null : _gestureStartAt, onVerticalDragUpdate: locked ? null : _gestureUpdate, onVerticalDragEnd: (_) => _gestureStart = null, child: Stack(alignment: Alignment.center, children: [
       if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: VideoPlayer(controller)))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: VideoPlayer(controller))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
-      if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),\n      if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
+      if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),
+      if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
         Row(children: [IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)), Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))), IconButton(onPressed: widget.onFavorite, icon: Icon(widget.favorite ? Icons.favorite : Icons.favorite_border, color: coral)), PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
           if (value.startsWith('speed:')) controller.setPlaybackSpeed(double.parse(value.substring(6)));
           if (value == 'fit') setState(() => fillScreen = !fillScreen);
-          if (value == 'rotate') _toggleFullscreen();\n          if (value == 'subtitle') _loadSubtitle();\n          if (value == 'subminus') setState(() => subtitleOffset -= const Duration(milliseconds: 500));\n          if (value == 'subplus') setState(() => subtitleOffset += const Duration(milliseconds: 500));\n          if (value == 'subsize') setState(() => subtitleSize = (subtitleSize ?? 22) >= 30 ? 16 : (subtitleSize ?? 22) + 2);
+          if (value == 'rotate') _toggleFullscreen();
+          if (value == 'subtitle') _loadSubtitle();
+          if (value == 'subminus') setState(() => subtitleOffset -= const Duration(milliseconds: 500));
+          if (value == 'subplus') setState(() => subtitleOffset += const Duration(milliseconds: 500));
+          if (value == 'subsize') setState(() => subtitleSize = (subtitleSize ?? 22) >= 30 ? 16 : (subtitleSize ?? 22) + 2);
         }, itemBuilder: (_) => [
           const PopupMenuItem(value: 'fit', child: Text('تبديل ملء الشاشة / احتواء')),
-          const PopupMenuItem(value: 'rotate', child: Text('تدوير الشاشة')),\n          const PopupMenuItem(value: 'subtitle', child: Text('اختيار ملف ترجمة')),\n          const PopupMenuItem(value: 'subminus', child: Text('تأخير الترجمة -0.5 ثانية')),\n          const PopupMenuItem(value: 'subplus', child: Text('تقديم الترجمة +0.5 ثانية')),\n          const PopupMenuItem(value: 'subsize', child: Text('تكبير / تصغير الترجمة')),
+          const PopupMenuItem(value: 'rotate', child: Text('تدوير الشاشة')),
+          const PopupMenuItem(value: 'subtitle', child: Text('اختيار ملف ترجمة')),
+          const PopupMenuItem(value: 'subminus', child: Text('تأخير الترجمة -0.5 ثانية')),
+          const PopupMenuItem(value: 'subplus', child: Text('تقديم الترجمة +0.5 ثانية')),
+          const PopupMenuItem(value: 'subsize', child: Text('تكبير / تصغير الترجمة')),
           const PopupMenuDivider(),
           ...[0.5, .75, 1.0, 1.25, 1.5, 2.0].map((s) => PopupMenuItem(value: 'speed:$s', child: Text('سرعة $s×'))),
         ])]),
@@ -474,7 +537,8 @@ class _WifiTransferScreenState extends State<WifiTransferScreen> {
           const Text('رمز المصادقة (خاص بك)', style: TextStyle(fontWeight: FontWeight.bold)),
           SelectableText(service.token ?? ''),
           const SizedBox(height: 12),
-          const Text('نقطة استقبال: POST /upload?name=filename.mp4\nالترويسة: Authorization: Bearer TOKEN', style: TextStyle(fontSize: 12)),
+          const Text('نقطة استقبال: POST /upload?name=filename.mp4
+الترويسة: Authorization: Bearer TOKEN', style: TextStyle(fontSize: 12)),
           const SizedBox(height: 12),
           OutlinedButton.icon(onPressed: busy ? null : _stop, icon: const Icon(Icons.stop_circle_outlined), label: const Text('إيقاف الاستقبال')),
         ] else FilledButton.icon(onPressed: busy ? null : _start, icon: const Icon(Icons.play_arrow), label: const Text('بدء استقبال الملفات')),
