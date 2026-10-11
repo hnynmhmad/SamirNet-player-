@@ -88,16 +88,16 @@ jobs:
                   original = gradle.read_text()
                   # Handle both Flutter's SDK variable and numeric SDK values (e.g. 34).
                   updated, count = re.subn(
-                      r'(?m)^(\\s*compileSdk(?:Version)?\\s*(?:=\\s*)?)(?:flutter\\.compileSdkVersion|[0-9]+)(\\s*)$',
-                      r'\\g<1>36\\g<2>',
+                      r'(?m)^(\s*compileSdk(?:Version)?\s*(?:=\s*)?)(?:flutter\.compileSdkVersion|[0-9]+)(\s*)$',
+                      r'\g<1>36\g<2>',
                       original
                   )
                   if count:
                       gradle.write_text(updated)
                   final = gradle.read_text()
-                  if re.search(r'(?m)^\\s*compileSdk(?:Version)?\\s*(?:=\\s*)?(?!36\\b)(?:flutter\\.compileSdkVersion|[0-9]+)', final):
+                  if re.search(r'(?m)^\s*compileSdk(?:Version)?\s*(?:=\s*)?(?!36\b)(?:flutter\.compileSdkVersion|[0-9]+)', final):
                       raise SystemExit(f'Could not force compileSdk 36 in {gradle}')
-                  if not re.search(r'(?m)^\\s*compileSdk(?:Version)?\\s*(?:=\\s*)?36\\s*$', final):
+                  if not re.search(r'(?m)^\s*compileSdk(?:Version)?\s*(?:=\s*)?36\s*$', final):
                       raise SystemExit(f'compileSdk=36 not explicitly verified in {gradle}')
                   verified.append(f'{package_dir.name}: {gradle.name}')
 
