@@ -445,7 +445,7 @@ class _VaultScreenState extends State<VaultScreen> {
     setState(() => busy = true);
     try {
       final temp = await VaultService.instance.decryptToTemporary(file, pin);
-      final destination = await FilePicker.platform.saveFile(fileName: 'restored_media.bin');
+      final meta = await VaultService.instance.metadataFor(file);\n      final originalName = meta['name'] as String? ?? 'restored_media.bin';\n      final destination = await FilePicker.platform.saveFile(fileName: originalName);
       if (destination != null) {
         await temp.copy(destination);
         await temp.delete();
@@ -479,7 +479,7 @@ class _VaultScreenState extends State<VaultScreen> {
           const SizedBox(height: 8),
           ...files.map((file) => Card(child: ListTile(
             leading: const CircleAvatar(backgroundColor: Color(0x1AEF4444), child: Icon(Icons.lock, color: coral)),
-            title: Text('ملف خاص ${files.indexOf(file) + 1}'),
+            title: FutureBuilder<Map<String, dynamic>>(future: VaultService.instance.metadataFor(file), builder: (_, snap) => Text(snap.data?['name'] as String? ?? 'ملف خاص ${files.indexOf(file) + 1}')),
             subtitle: Text('${(file.lengthSync() / 1024).toStringAsFixed(1)} كيلوبايت · مشفر'),
             onTap: () => _restore(file),
             trailing: PopupMenuButton<String>(onSelected: (v) => v == 'restore' ? _restore(file) : _delete(file), itemBuilder: (_) => const [
