@@ -61,7 +61,7 @@ jobs:
           PY
       - name: Resolve dependencies
         run: flutter pub get
-      - name: Force required Android plugins to compile SDK 36
+      - name: Normalize Android plugin compile SDK versions
         shell: bash
         run: |
           python3 - <<'PY'
@@ -69,42 +69,39 @@ jobs:
           import re
 
           root = Path.home() / '.pub-cache' / 'hosted' / 'pub.dev'
-          required = ('file_picker-', 'flutter_plugin_android_lifecycle-')
-          found = {prefix: False for prefix in required}
-          verified = []
+          gradle_files = sorted(
+              p for package in root.iterdir() if package.is_dir()
+              for p in (package / 'android').glob('build.gradle*')
+          )
+          if not gradle_files:
+              raise SystemExit('No Android plugin Gradle files found in pub cache')
 
-          for package_dir in root.iterdir():
-              if not package_dir.is_dir():
-                  continue
-              prefix = next((p for p in required if package_dir.name.startswith(p)), None)
-              if prefix is None:
-                  continue
-              found[prefix] = True
-              gradle_files = list((package_dir / 'android').glob('build.gradle*'))
-              if not gradle_files:
-                  raise SystemExit(f'Missing Android Gradle file for {package_dir.name}')
+          updated_files = []
+          compile_sdk_files = []
+          unsupported = []
+          # Normalize every plugin compileSdk declaration, not only the first plugin
+          # that happens to fail AAR metadata checks.
+          declaration = re.compile(
+              r'(?m)^(\\s*compileSdk(?:Version)?\\s*(?:=\\s*)?)(flutter\\.compileSdkVersion|[0-9]+)(\\s*(?:\\/\/.*)?)$'
+          )
+          for gradle in gradle_files:
+              original = gradle.read_text()
+              updated, count = declaration.subn(r'\\g<1>36\\g<3>', original)
+              if count:
+                  gradle.write_text(updated)
+                  updated_files.append(str(gradle))
+              final = gradle.read_text()
+              if re.search(r'(?m)^\\s*compileSdk(?:Version)?\\s*(?:=\\s*)?[^\\n]+', final):
+                  compile_sdk_files.append(str(gradle))
+                  if not re.search(r'(?m)^\\s*compileSdk(?:Version)?\\s*(?:=\\s*)?36\\s*(?:\\/\/.*)?$', final):
+                      unsupported.append(str(gradle))
 
-              for gradle in gradle_files:
-                  original = gradle.read_text()
-                  # Handle both Flutter's SDK variable and numeric SDK values (e.g. 34).
-                  updated, count = re.subn(
-                      r'(?m)^(\s*compileSdk(?:Version)?\s*(?:=\s*)?)(?:flutter\.compileSdkVersion|[0-9]+)(\s*)$',
-                      r'\g<1>36\g<2>',
-                      original
-                  )
-                  if count:
-                      gradle.write_text(updated)
-                  final = gradle.read_text()
-                  if re.search(r'(?m)^\s*compileSdk(?:Version)?\s*(?:=\s*)?(?!36\b)(?:flutter\.compileSdkVersion|[0-9]+)', final):
-                      raise SystemExit(f'Could not force compileSdk 36 in {gradle}')
-                  if not re.search(r'(?m)^\s*compileSdk(?:Version)?\s*(?:=\s*)?36\s*$', final):
-                      raise SystemExit(f'compileSdk=36 not explicitly verified in {gradle}')
-                  verified.append(f'{package_dir.name}: {gradle.name}')
-
-          missing = [p for p, exists in found.items() if not exists]
-          if missing:
-              raise SystemExit('Required plugins not found in pub cache: ' + ', '.join(missing))
-          print('Verified explicit compileSdk=36 for: ' + ', '.join(verified))
+          if unsupported:
+              raise SystemExit('Could not normalize compileSdk declarations in: ' + ', '.join(unsupported))
+          if not compile_sdk_files:
+              raise SystemExit('No plugin compileSdk declarations were found to verify')
+          print('Normalized plugin Gradle files: ' + str(len(updated_files)))
+          print('Verified compileSdk=36 in: ' + str(len(compile_sdk_files)) + ' plugin Gradle files')
           PY
       - name: Align plugin JVM target with Android Java target
         shell: bash
