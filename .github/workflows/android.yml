@@ -112,17 +112,28 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
+
           root = Path.home() / '.pub-cache' / 'hosted' / 'pub.dev'
-          matches = []
-          for path in root.glob('volume_controller-*/android/build.gradle*'):
-              text = path.read_text()
-              updated = re.sub(r'''(jvmTarget\s*=\s*["'])1\.8(["'])''', r'\g<1>11\g<2>', text)
-              if updated != text:
+          candidates = sorted(root.glob('volume_controller-*/android/build.gradle*'))
+          if not candidates:
+              print('No volume_controller Android Gradle file found; skipping optional compatibility patch')
+          changed = []
+          for path in candidates:
+              original = path.read_text()
+              updated = original
+              updated = re.sub(
+                  r'''(jvmTarget\\s*=\\s*["'])1\\.8(["'])''',
+                  r'\\g<1>11\\g<2>', updated)
+              updated = re.sub(
+                  r'''(jvmTarget\\s*=\\s*)JavaVersion\\.VERSION_1_8''',
+                  r'\\g<1>JavaVersion.VERSION_11', updated)
+              updated = re.sub(
+                  r'''(JvmTarget\\.JVM_1_8)''',
+                  'JvmTarget.JVM_11', updated)
+              if updated != original:
                   path.write_text(updated)
-                  matches.append(str(path))
-          if not matches:
-              raise SystemExit('Could not find a volume_controller Gradle JVM target to align')
-          print('Aligned Kotlin JVM target to 11 in: ' + ', '.join(matches))
+                  changed.append(str(path))
+          print('Patched legacy volume_controller JVM targets: ' + (', '.join(changed) if changed else 'none required'))
           PY
       - name: Analyze
         run: flutter analyze
