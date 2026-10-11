@@ -43,7 +43,7 @@ class _SamirNetAppState extends State<SamirNetApp> {
   }
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'SamirNet Player', debugShowCheckedModeBanner: false, locale: const Locale('ar'),
+    title: 'SN Player', debugShowCheckedModeBanner: false, locale: const Locale('ar'),
     supportedLocales: const [Locale('ar'), Locale('en')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
     themeMode: mode,
@@ -133,7 +133,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       CircleAvatar(backgroundColor: coral, child: Icon(Icons.play_arrow_rounded, color: Colors.white)),
       SizedBox(width: 10),
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('SamirNet Player', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        Text('SN Player', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
         Text('مشغّل الوسائط الخاص بك', style: TextStyle(fontSize: 11, color: Colors.grey)),
       ]),
     ]), actions: [
@@ -212,7 +212,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ListTile(leading: const Icon(Icons.lock_outline, color: coral), title: const Text('الخزنة الخاصة'), subtitle: const Text('تشفير ملفاتك وحمايتها برقم سري'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VaultScreen()))),
       ListTile(leading: const Icon(Icons.wifi, color: coral), title: const Text('نقل عبر Wi-Fi'), subtitle: const Text('استقبال ملفات من جهاز آخر على الشبكة نفسها'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WifiTransferScreen()))),
     ])),
-    const SizedBox(height: 20), const Center(child: Text('SamirNet Player · 0.1.0', style: TextStyle(color: Colors.grey))),
+    const SizedBox(height: 20), const Center(child: Text('SN Player · 0.1.0', style: TextStyle(color: Colors.grey))),
   ]);
   Widget _empty(IconData icon, String title, String subtitle, String action, VoidCallback onTap) => Center(child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
     Icon(icon, size: 60, color: coral), const SizedBox(height: 16), Text(title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const SizedBox(height: 8), Text(subtitle, textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)), const SizedBox(height: 16), FilledButton.icon(onPressed: onTap, icon: const Icon(Icons.refresh), label: Text(action)),
