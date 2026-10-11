@@ -37,106 +37,8 @@ jobs:
               raise SystemExit('Android app Gradle build file was not generated')
           text = path.read_text()
           patterns = [
-              (r'(?m)^(\\s*compileSdk\\s*=\\s*)flutter\\.compileSdkVersion\\s*        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('android/app/src/main/AndroidManifest.xml')
-          text = path.read_text()
-          permissions = '''    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-          '''
-          if 'android.permission.READ_MEDIA_VIDEO' not in text:
-              text = text.replace('<application', permissions + '\n    <application', 1)
-          path.write_text(text)
-          PY
-      - name: Resolve dependencies
-        run: flutter pub get
-      - name: Align plugin JVM target with Android Java target
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          roots = [Path.home() / '.pub-cache' / 'hosted' / 'pub.dev']
-          matches = []
-          for root in roots:
-              if not root.exists():
-                  continue
-              for path in root.glob('volume_controller-*/android/build.gradle*'):
-                  text = path.read_text()
-                  pattern = r'''(jvmTarget\s*=\s*["'])1\.8(["'])'''
-                  updated = re.sub(pattern, r'\g<1>11\g<2>', text)
-                  if updated != text:
-                      path.write_text(updated)
-                      matches.append(str(path))
-          if not matches:
-              raise SystemExit('Could not find a volume_controller Gradle JVM target to align')
-          print('Aligned Kotlin JVM target to 11 in: ' + ', '.join(matches))
-          PY
-      - name: Analyze
-        run: flutter analyze
-      - name: Test
-        run: flutter test
-      - name: Build release APK
-        run: flutter build apk --release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: samirnet-player-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
-          retention-days: 14
-, r'\\g<1>36'),
-              (r'(?m)^(\\s*compileSdkVersion\\s+)flutter\\.compileSdkVersion\\s*        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('android/app/src/main/AndroidManifest.xml')
-          text = path.read_text()
-          permissions = '''    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-          '''
-          if 'android.permission.READ_MEDIA_VIDEO' not in text:
-              text = text.replace('<application', permissions + '\n    <application', 1)
-          path.write_text(text)
-          PY
-      - name: Resolve dependencies
-        run: flutter pub get
-      - name: Align plugin JVM target with Android Java target
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          roots = [Path.home() / '.pub-cache' / 'hosted' / 'pub.dev']
-          matches = []
-          for root in roots:
-              if not root.exists():
-                  continue
-              for path in root.glob('volume_controller-*/android/build.gradle*'):
-                  text = path.read_text()
-                  pattern = r'''(jvmTarget\s*=\s*["'])1\.8(["'])'''
-                  updated = re.sub(pattern, r'\g<1>11\g<2>', text)
-                  if updated != text:
-                      path.write_text(updated)
-                      matches.append(str(path))
-          if not matches:
-              raise SystemExit('Could not find a volume_controller Gradle JVM target to align')
-          print('Aligned Kotlin JVM target to 11 in: ' + ', '.join(matches))
-          PY
-      - name: Analyze
-        run: flutter analyze
-      - name: Test
-        run: flutter test
-      - name: Build release APK
-        run: flutter build apk --release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: samirnet-player-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
-          retention-days: 14
-, r'\\g<1>36'),
+              (r'(?m)^(\s*compileSdk\s*=\s*)flutter\.compileSdkVersion\s*$', r'\g<1>36'),
+              (r'(?m)^(\s*compileSdkVersion\s+)flutter\.compileSdkVersion\s*$', r'\g<1>36'),
           ]
           updated = text
           for pattern, replacement in patterns:
@@ -144,56 +46,7 @@ jobs:
               if count:
                   break
           if updated == text:
-              if re.search(r'(?m)^\\s*compileSdk(?:Version)?\\s*(?:=\\s*)?36\\s*        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('android/app/src/main/AndroidManifest.xml')
-          text = path.read_text()
-          permissions = '''    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-          '''
-          if 'android.permission.READ_MEDIA_VIDEO' not in text:
-              text = text.replace('<application', permissions + '\n    <application', 1)
-          path.write_text(text)
-          PY
-      - name: Resolve dependencies
-        run: flutter pub get
-      - name: Align plugin JVM target with Android Java target
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          roots = [Path.home() / '.pub-cache' / 'hosted' / 'pub.dev']
-          matches = []
-          for root in roots:
-              if not root.exists():
-                  continue
-              for path in root.glob('volume_controller-*/android/build.gradle*'):
-                  text = path.read_text()
-                  pattern = r'''(jvmTarget\s*=\s*["'])1\.8(["'])'''
-                  updated = re.sub(pattern, r'\g<1>11\g<2>', text)
-                  if updated != text:
-                      path.write_text(updated)
-                      matches.append(str(path))
-          if not matches:
-              raise SystemExit('Could not find a volume_controller Gradle JVM target to align')
-          print('Aligned Kotlin JVM target to 11 in: ' + ', '.join(matches))
-          PY
-      - name: Analyze
-        run: flutter analyze
-      - name: Test
-        run: flutter test
-      - name: Build release APK
-        run: flutter build apk --release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: samirnet-player-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
-          retention-days: 14
-, text):
+              if re.search(r'(?m)^\s*compileSdk(?:Version)?\s*(?:=\s*)?36\s*$', text):
                   print('Android compile SDK is already 36')
               else:
                   raise SystemExit(f'Could not safely set compileSdk to 36 in {path}')
