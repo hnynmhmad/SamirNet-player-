@@ -70,6 +70,152 @@ jobs:
           PY
       - name: Resolve dependencies
         run: flutter pub get
+      - name: Set Android library plugins compile SDK to 36
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          root = Path.home() / '.pub-cache' / 'hosted' / 'pub.dev'
+          if not root.exists():
+              raise SystemExit(f'Pub cache not found: {root}')
+          targets = ('file_picker-', 'flutter_plugin_android_lifecycle-')
+          required = {name: False for name in targets}
+          changed = []
+          patterns = [
+              (r'(?m)^(\\s*compileSdk\\s*=\\s*)flutter\\.compileSdkVersion\\s*        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          roots = [Path.home() / '.pub-cache' / 'hosted' / 'pub.dev']
+          matches = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for path in root.glob('volume_controller-*/android/build.gradle*'):
+                  text = path.read_text()
+                  pattern = r'''(jvmTarget\s*=\s*["'])1\.8(["'])'''
+                  updated = re.sub(pattern, r'\g<1>11\g<2>', text)
+                  if updated != text:
+                      path.write_text(updated)
+                      matches.append(str(path))
+          if not matches:
+              raise SystemExit('Could not find a volume_controller Gradle JVM target to align')
+          print('Aligned Kotlin JVM target to 11 in: ' + ', '.join(matches))
+          PY
+      - name: Analyze
+        run: flutter analyze
+      - name: Test
+        run: flutter test
+      - name: Build release APK
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: samirnet-player-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
+, r'\\g<1>36'),
+              (r'(?m)^(\\s*compileSdkVersion\\s+)flutter\\.compileSdkVersion\\s*        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          roots = [Path.home() / '.pub-cache' / 'hosted' / 'pub.dev']
+          matches = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for path in root.glob('volume_controller-*/android/build.gradle*'):
+                  text = path.read_text()
+                  pattern = r'''(jvmTarget\s*=\s*["'])1\.8(["'])'''
+                  updated = re.sub(pattern, r'\g<1>11\g<2>', text)
+                  if updated != text:
+                      path.write_text(updated)
+                      matches.append(str(path))
+          if not matches:
+              raise SystemExit('Could not find a volume_controller Gradle JVM target to align')
+          print('Aligned Kotlin JVM target to 11 in: ' + ', '.join(matches))
+          PY
+      - name: Analyze
+        run: flutter analyze
+      - name: Test
+        run: flutter test
+      - name: Build release APK
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: samirnet-player-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
+, r'\\g<1>36'),
+              (r'(?m)^(\\s*compileSdkVersion\\s*=\\s*)flutter\\.compileSdkVersion\\s*        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          roots = [Path.home() / '.pub-cache' / 'hosted' / 'pub.dev']
+          matches = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for path in root.glob('volume_controller-*/android/build.gradle*'):
+                  text = path.read_text()
+                  pattern = r'''(jvmTarget\s*=\s*["'])1\.8(["'])'''
+                  updated = re.sub(pattern, r'\g<1>11\g<2>', text)
+                  if updated != text:
+                      path.write_text(updated)
+                      matches.append(str(path))
+          if not matches:
+              raise SystemExit('Could not find a volume_controller Gradle JVM target to align')
+          print('Aligned Kotlin JVM target to 11 in: ' + ', '.join(matches))
+          PY
+      - name: Analyze
+        run: flutter analyze
+      - name: Test
+        run: flutter test
+      - name: Build release APK
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: samirnet-player-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
+, r'\\g<1>36'),
+          ]
+          for package_dir in root.iterdir():
+              if not package_dir.is_dir():
+                  continue
+              for prefix in targets:
+                  if package_dir.name.startswith(prefix):
+                      required[prefix] = True
+              for gradle in (package_dir / 'android').glob('build.gradle*'):
+                  original = gradle.read_text()
+                  updated = original
+                  for pattern, replacement in patterns:
+                      updated = re.sub(pattern, replacement, updated)
+                  if updated != original:
+                      gradle.write_text(updated)
+                      changed.append(str(gradle))
+          missing = [name for name, found in required.items() if not found]
+          if missing:
+              raise SystemExit('Expected Android plugins not found in pub cache: ' + ', '.join(missing))
+          for prefix in targets:
+              dirs = [p for p in root.iterdir() if p.is_dir() and p.name.startswith(prefix)]
+              for directory in dirs:
+                  gradle_files = list((directory / 'android').glob('build.gradle*'))
+                  if not gradle_files:
+                      raise SystemExit(f'No Android Gradle file found for {directory.name}')
+                  for gradle in gradle_files:
+                      text = gradle.read_text()
+                      if re.search(r'flutter\\.compileSdkVersion', text):
+                          raise SystemExit(f'compileSdk still references flutter.compileSdkVersion in {gradle}')
+          print('Changed plugin Gradle files: ' + (', '.join(changed) if changed else '(none needed)'))
+          print('Verified file_picker and flutter_plugin_android_lifecycle Android Gradle files.')
+          PY
       - name: Align plugin JVM target with Android Java target
         shell: bash
         run: |
