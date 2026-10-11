@@ -36,23 +36,14 @@ jobs:
           if path is None:
               raise SystemExit('Android app Gradle build file was not generated')
           text = path.read_text()
-          patterns = [
-              (r'(?m)^(\s*compileSdk\s*=\s*)flutter\.compileSdkVersion\s*$', r'\g<1>36'),
-              (r'(?m)^(\s*compileSdkVersion\s+)flutter\.compileSdkVersion\s*$', r'\g<1>36'),
-          ]
-          updated = text
-          for pattern, replacement in patterns:
-              updated, count = re.subn(pattern, replacement, updated)
-              if count:
-                  break
-          if updated == text:
-              if re.search(r'(?m)^\s*compileSdk(?:Version)?\s*(?:=\s*)?36\s*$', text):
-                  print('Android app compile SDK is already 36')
-              else:
-                  raise SystemExit(f'Could not safely set compileSdk to 36 in {path}')
-          else:
+          updated, count = re.subn(r'(?m)^(\s*compileSdk\s*=\s*)flutter\.compileSdkVersion\s*$', r'\g<1>36', text)
+          if not count:
+              updated, count = re.subn(r'(?m)^(\s*compileSdkVersion\s+)flutter\.compileSdkVersion\s*$', r'\g<1>36', text)
+          if count:
               path.write_text(updated)
-              print(f'Set app compileSdk to 36 in {path}')
+          elif not re.search(r'(?m)^\s*compileSdk(?:Version)?\s*(?:=\s*)?36\s*$', text):
+              raise SystemExit(f'Could not safely set compileSdk to 36 in {path}')
+          print(f'Android app compileSdk=36 verified in {path}')
           PY
       - name: Configure Android media permissions
         shell: bash
@@ -70,52 +61,41 @@ jobs:
           PY
       - name: Resolve dependencies
         run: flutter pub get
-      - name: Set Android library plugins compile SDK to 36
+      - name: Force required Android plugins to compile SDK 36
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
           root = Path.home() / '.pub-cache' / 'hosted' / 'pub.dev'
-          if not root.exists():
-              raise SystemExit(f'Pub cache not found: {root}')
-          required_prefixes = ('file_picker-', 'flutter_plugin_android_lifecycle-')
-          found = {prefix: False for prefix in required_prefixes}
+          required = ('file_picker-', 'flutter_plugin_android_lifecycle-')
+          found = {prefix: False for prefix in required}
           changed = []
-          patterns = [
-              (r'(?m)^(\s*compileSdk\s*=\s*)flutter\.compileSdkVersion\s*$', r'\g<1>36'),
-              (r'(?m)^(\s*compileSdkVersion\s*=\s*)flutter\.compileSdkVersion\s*$', r'\g<1>36'),
-              (r'(?m)^(\s*compileSdkVersion\s+)flutter\.compileSdkVersion\s*$', r'\g<1>36'),
-          ]
           for package_dir in root.iterdir():
               if not package_dir.is_dir():
                   continue
-              for prefix in required_prefixes:
+              if not any(package_dir.name.startswith(prefix) for prefix in required):
+                  continue
+              for prefix in required:
                   if package_dir.name.startswith(prefix):
                       found[prefix] = True
-              for gradle in (package_dir / 'android').glob('build.gradle*'):
+              gradle_files = list((package_dir / 'android').glob('build.gradle*'))
+              if not gradle_files:
+                  raise SystemExit(f'Missing Android Gradle file for {package_dir.name}')
+              for gradle in gradle_files:
                   original = gradle.read_text()
-                  updated = original
-                  for pattern, replacement in patterns:
-                      updated = re.sub(pattern, replacement, updated)
+                  updated = original.replace('flutter.compileSdkVersion', '36')
                   if updated != original:
                       gradle.write_text(updated)
                       changed.append(str(gradle))
+                  if 'flutter.compileSdkVersion' in gradle.read_text():
+                      raise SystemExit(f'compileSdk override failed in {gradle}')
+                  if 'compileSdk' not in gradle.read_text():
+                      raise SystemExit(f'Could not verify compileSdk in {gradle}')
           missing = [prefix for prefix, exists in found.items() if not exists]
           if missing:
-              raise SystemExit('Required Android plugins not found: ' + ', '.join(missing))
-          for prefix in required_prefixes:
-              for package_dir in root.iterdir():
-                  if not package_dir.is_dir() or not package_dir.name.startswith(prefix):
-                      continue
-                  gradle_files = list((package_dir / 'android').glob('build.gradle*'))
-                  if not gradle_files:
-                      raise SystemExit(f'No Android Gradle file for {package_dir.name}')
-                  for gradle in gradle_files:
-                      if re.search(r'flutter\.compileSdkVersion', gradle.read_text()):
-                          raise SystemExit(f'compileSdk not updated in {gradle}')
-          print('Updated plugin Gradle files: ' + (', '.join(changed) if changed else 'none required'))
-          print('Verified file_picker and flutter_plugin_android_lifecycle use explicit compile SDK values.')
+              raise SystemExit('Required plugins not found in pub cache: ' + ', '.join(missing))
+          print('Modified plugin Gradle files: ' + ', '.join(changed))
+          print('Verified file_picker and flutter_plugin_android_lifecycle Gradle configuration.')
           PY
       - name: Align plugin JVM target with Android Java target
         shell: bash
