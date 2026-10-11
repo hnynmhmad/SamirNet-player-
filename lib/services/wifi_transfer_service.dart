@@ -79,7 +79,7 @@ class WifiTransferService {
     }
     final file = File('${_inbox!.path}/${DateTime.now().microsecondsSinceEpoch}_$name');
     final sink = file.openWrite();
-    final digestSink = AccumulatorSink<Digest>();
+    final digestSink = _DigestCollector();
     final digestInput = sha256.startChunkedConversion(digestSink);
     var size = 0;
     try {
@@ -94,7 +94,7 @@ class WifiTransferService {
       digestInput.close();
       await sink.flush();
       await sink.close();
-      final digest = digestSink.events.single.toString();
+      final digest = digestSink.value.toString();
       response.statusCode = HttpStatus.created;
       response.write(jsonEncode({
         'saved': true,
@@ -124,4 +124,13 @@ class WifiTransferService {
     _token = null;
     if (server != null) await server.close(force: true);
   }
+}
+
+
+class _DigestCollector implements Sink<Digest> {
+  Digest? value;
+  @override
+  void add(Digest data) { value = data; }
+  @override
+  void close() {}
 }
