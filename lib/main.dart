@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -8,7 +7,6 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import 'services/vault_service.dart';
 import 'services/wifi_transfer_service.dart';
 
@@ -410,7 +408,7 @@ class _VaultScreenState extends State<VaultScreen> {
           const SizedBox(height: 16), const Text('خزنتك الخاصة', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8), const Text('تُحفظ الملفات داخل مساحة التطبيق بصيغة مشفرة AES. احفظ رقمك السري؛ لا توجد طريقة لاستعادة الملفات بدونه.', textAlign: TextAlign.center),
           const SizedBox(height: 16), FilledButton.icon(onPressed: _import, icon: const Icon(Icons.add), label: const Text('تشفير ملف وإضافته')),
-        ]))
+        ])))
       : ListView(padding: const EdgeInsets.all(16), children: [
           const Text('الملفات المشفرة', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
