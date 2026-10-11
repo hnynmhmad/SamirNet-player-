@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -6,6 +7,10 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'services/vault_service.dart';
+import 'services/wifi_transfer_service.dart';
 
 const coral = Color(0xFFEF4444);
 const ink = Color(0xFF111827);
@@ -42,8 +47,8 @@ class _SamirNetAppState extends State<SamirNetApp> {
     supportedLocales: const [Locale('ar'), Locale('en')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
     themeMode: mode,
-    theme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: coral), scaffoldBackgroundColor: const Color(0xFFF8FAFC)),
-    darkTheme: ThemeData(useMaterial3: true, brightness: Brightness.dark, colorScheme: ColorScheme.fromSeed(seedColor: coral, brightness: Brightness.dark), scaffoldBackgroundColor: ink),
+    theme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: coral), scaffoldBackgroundColor: const Color(0xFFF8FAFC), cardTheme: CardThemeData(elevation: 0, margin: EdgeInsets.zero, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: const BorderSide(color: Color(0xFFE5E7EB)))), appBarTheme: const AppBarTheme(centerTitle: false, scrolledUnderElevation: 0)),
+    darkTheme: ThemeData(useMaterial3: true, brightness: Brightness.dark, colorScheme: ColorScheme.fromSeed(seedColor: coral, brightness: Brightness.dark), scaffoldBackgroundColor: ink, cardTheme: CardThemeData(elevation: 0, margin: EdgeInsets.zero, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)))),
     home: LibraryScreen(mode: mode, onMode: _setMode),
   );
 }
@@ -52,7 +57,7 @@ class MediaEntry {
   MediaEntry(this.asset);
   final AssetEntity asset;
   String get id => asset.id;
-  String get name => asset.title;
+  String get name => asset.title ?? 'فيديو بدون اسم';
   Duration get duration => Duration(seconds: asset.duration);
 }
 
@@ -133,7 +138,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ]),
     body: tab == 4 ? _settings() : tab == 1 ? _folders() : _library(),
     bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (v) => setState(() => tab = v), destinations: const [
-      NavigationDestination(icon: Icon(Icons.video-library_outlined), selectedIcon: Icon(Icons.video-library), label: 'الرئيسية'),
+      NavigationDestination(icon: Icon(Icons.video_library_outlined), selectedIcon: Icon(Icons.video_library), label: 'الرئيسية'),
       NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder), label: 'المجلدات'),
       NavigationDestination(icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: 'المفضلة'),
       NavigationDestination(icon: Icon(Icons.history), selectedIcon: Icon(Icons.history_rounded), label: 'السجل'),
@@ -159,7 +164,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       if (loading) const SliverFillRemaining(child: Center(child: CircularProgressIndicator(color: coral)))
       else if (denied) SliverFillRemaining(hasScrollBody: false, child: _empty(Icons.perm_media_outlined, 'نحتاج إلى إذن الوصول للوسائط', 'اسمح بالوصول إلى الفيديوهات المحلية.', 'إعادة المحاولة', _scan))
       else if (items.isEmpty) SliverFillRemaining(hasScrollBody: false, child: _empty(Icons.video_library_outlined, query.isNotEmpty ? 'لا توجد نتائج' : 'لم نعثر على فيديوهات', 'أضف فيديو إلى الهاتف ثم حدّث المكتبة.', 'تحديث المكتبة', _scan))
-      else if (grid) SliverPadding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 24), sliver: SliverGrid(delegate: SliverChildBuilderDelegate((context, i) => _videoCard(items[i], true), childCount: items.length), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: .82)))
+      else if (grid) SliverPadding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 24), sliver: SliverGrid(delegate: SliverChildBuilderDelegate((context, i) => _videoCard(items[i], true), childCount: items.length), gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 240, crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: .78)))
       else SliverPadding(padding: const EdgeInsets.all(16), sliver: SliverList(delegate: SliverChildBuilderDelegate((context, i) => Padding(padding: const EdgeInsets.only(bottom: 8), child: _videoCard(items[i], false)), childCount: items.length))),
     ]));
   }
@@ -199,8 +204,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
       RadioListTile<ThemeMode>(title: const Text('الوضع الداكن'), value: ThemeMode.dark, groupValue: widget.mode, onChanged: (v) { if (v != null) widget.onMode(v); }),
       SwitchListTile(value: grid, onChanged: (v) => setState(() => grid = v), title: const Text('عرض الشبكة'), subtitle: const Text('إيقاف الخيار يعرض الملفات في قائمة')),
       ListTile(leading: const Icon(Icons.refresh), title: const Text('تحديث مكتبة الوسائط'), onTap: _scan),
-      const ListTile(leading: Icon(Icons.lock_outline), title: Text('الخزنة الخاصة'), subtitle: Text('التشفير قيد التطوير')),
-      const ListTile(leading: Icon(Icons.wifi), title: Text('نقل عبر Wi-Fi'), subtitle: Text('النقل المحلي قيد التطوير')),
+      ListTile(leading: const Icon(Icons.lock_outline, color: coral), title: const Text('الخزنة الخاصة'), subtitle: const Text('تشفير ملفاتك وحمايتها برقم سري'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VaultScreen()))),
+      ListTile(leading: const Icon(Icons.wifi, color: coral), title: const Text('نقل عبر Wi-Fi'), subtitle: const Text('استقبال ملفات من جهاز آخر على الشبكة نفسها'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WifiTransferScreen()))),
     ])),
     const SizedBox(height: 20), const Center(child: Text('SamirNet Player · 0.1.0', style: TextStyle(color: Colors.grey))),
   ]);
@@ -218,27 +223,86 @@ class PlayerScreen extends StatefulWidget {
 }
 class _PlayerScreenState extends State<PlayerScreen> {
   late final VideoPlayerController controller;
-  bool ready = false, controls = true, locked = false;
+  bool ready = false, controls = true, locked = false, fillScreen = false;
+  Timer? _hideTimer;
+  DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
   @override
-  void initState() { super.initState(); controller = VideoPlayerController.file(widget.file)..initialize().then((_) { if (mounted) setState(() => ready = true); controller.play(); }); controller.addListener(_update); }
-  void _update() { if (mounted) setState(() {}); }
+  void initState() {
+    super.initState();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight, DeviceOrientation.portraitUp]);
+    controller = VideoPlayerController.file(widget.file);
+    controller.initialize().then((_) async {
+      final prefs = await SharedPreferences.getInstance();
+      final resume = prefs.getInt('resume_${widget.entry.id}') ?? 0;
+      if (resume > 0 && resume < controller.value.duration.inMilliseconds - 3000) {
+        await controller.seekTo(Duration(milliseconds: resume));
+      }
+      if (mounted) setState(() => ready = true);
+      await controller.play();
+      _scheduleHide();
+    }).catchError((Object error) {
+      if (mounted) setState(() => ready = false);
+    });
+    controller.addListener(_update);
+  }
+  void _update() {
+    if (!mounted) return;
+    if (controller.value.isInitialized && DateTime.now().difference(_lastSaved).inSeconds >= 5) {
+      _lastSaved = DateTime.now();
+      SharedPreferences.getInstance().then((p) => p.setInt('resume_${widget.entry.id}', controller.value.position.inMilliseconds));
+    }
+    setState(() {});
+  }
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    if (controls && !locked && controller.value.isPlaying) {
+      _hideTimer = Timer(const Duration(seconds: 4), () {
+        if (mounted) setState(() => controls = false);
+      });
+    }
+  }
+  void _showControls() {
+    setState(() => controls = true);
+    _scheduleHide();
+  }
+  Future<void> _toggleFullscreen() async {
+    final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
+    await SystemChrome.setPreferredOrientations(landscape ? [DeviceOrientation.portraitUp] : [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+  }
   @override
-  void dispose() { controller.removeListener(_update); controller.dispose(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); super.dispose(); }
+  void dispose() {
+    _hideTimer?.cancel();
+    controller.removeListener(_update);
+    controller.dispose();
+    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    super.dispose();
+  }
   void _seek(int seconds) { final target = controller.value.position + Duration(seconds: seconds); controller.seekTo(target < Duration.zero ? Duration.zero : target); }
   String _time(Duration d) { final h = d.inHours; final m = d.inMinutes.remainder(60).toString().padLeft(2, '0'); final s = d.inSeconds.remainder(60).toString().padLeft(2, '0'); return h > 0 ? '$h:$m:$s' : '$m:$s'; }
   @override
   Widget build(BuildContext context) {
     final v = controller.value;
-    return Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) setState(() => controls = !controls); }, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, child: Stack(alignment: Alignment.center, children: [
-      if (ready) Center(child: AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: VideoPlayer(controller))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
+    return Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, child: Stack(alignment: Alignment.center, children: [
+      if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: VideoPlayer(controller)))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: VideoPlayer(controller))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
       if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
-        Row(children: [IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)), Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))), IconButton(onPressed: widget.onFavorite, icon: Icon(widget.favorite ? Icons.favorite : Icons.favorite_border, color: coral)), PopupMenuButton<double>(icon: const Icon(Icons.speed, color: Colors.white), onSelected: controller.setPlaybackSpeed, itemBuilder: (_) => [0.5, .75, 1.0, 1.25, 1.5, 2.0].map((s) => PopupMenuItem(value: s, child: Text(s.toString() + 'x'))).toList())]),
+        Row(children: [IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)), Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))), IconButton(onPressed: widget.onFavorite, icon: Icon(widget.favorite ? Icons.favorite : Icons.favorite_border, color: coral)), PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
+          if (value.startsWith('speed:')) controller.setPlaybackSpeed(double.parse(value.substring(6)));
+          if (value == 'fit') setState(() => fillScreen = !fillScreen);
+          if (value == 'rotate') _toggleFullscreen();
+        }, itemBuilder: (_) => [
+          const PopupMenuItem(value: 'fit', child: Text('تبديل ملء الشاشة / احتواء')),
+          const PopupMenuItem(value: 'rotate', child: Text('تدوير الشاشة')),
+          const PopupMenuDivider(),
+          ...[0.5, .75, 1.0, 1.25, 1.5, 2.0].map((s) => PopupMenuItem(value: 'speed:$s', child: Text('سرعة $s×'))),
+        ])]),
         const Spacer(),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [IconButton(onPressed: () => _seek(-10), icon: const Icon(Icons.replay_10, color: Colors.white, size: 36)), const SizedBox(width: 24), IconButton(onPressed: () => v.isPlaying ? controller.pause() : controller.play(), icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white, size: 64)), const SizedBox(width: 24), IconButton(onPressed: () => _seek(10), icon: const Icon(Icons.forward_10, color: Colors.white, size: 36))]),
         const Spacer(),
         Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: Column(children: [
           VideoProgressIndicator(controller, allowScrubbing: true, colors: const VideoProgressColors(playedColor: coral, bufferedColor: Colors.white38, backgroundColor: Colors.white24)),
-          Row(children: [Text(_time(v.position), style: const TextStyle(color: Colors.white, fontSize: 12)), const Spacer(), Text('-' + _time(v.duration - v.position), style: const TextStyle(color: Colors.white, fontSize: 12)), IconButton(onPressed: () { setState(() => locked = true); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); }, icon: const Icon(Icons.lock_open, color: Colors.white))]),
+          Row(children: [Text(_time(v.position), style: const TextStyle(color: Colors.white, fontSize: 12)), const Spacer(), Text('-${_time(v.duration - v.position)}', style: const TextStyle(color: Colors.white, fontSize: 12)), IconButton(onPressed: () { setState(() => locked = true); _hideTimer?.cancel(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); }, icon: const Icon(Icons.lock_open, color: Colors.white))]),
         ])),
       ])))),
       if (locked) Positioned(left: 16, bottom: 32, child: IconButton.filledTonal(onPressed: () { setState(() { locked = false; controls = true; }); SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); }, icon: const Icon(Icons.lock))),
