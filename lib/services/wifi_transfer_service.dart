@@ -79,7 +79,8 @@ class WifiTransferService {
     }
     final file = File('${_inbox!.path}/${DateTime.now().microsecondsSinceEpoch}_$name');
     final sink = file.openWrite();
-    final chunks = <List<int>>[];
+    final digestSink = AccumulatorSink<Digest>();
+    final digestInput = sha256.startChunkedConversion(digestSink);
     var size = 0;
     try {
       await for (final chunk in request) {
@@ -88,11 +89,12 @@ class WifiTransferService {
           throw const HttpException('File exceeds 2 GiB limit');
         }
         sink.add(chunk);
-        chunks.add(chunk);
+        digestInput.add(chunk);
       }
+      digestInput.close();
       await sink.flush();
       await sink.close();
-      final digest = sha256.convert(chunks.expand((c) => c).toList()).toString();
+      final digest = digestSink.events.single.toString();
       response.statusCode = HttpStatus.created;
       response.write(jsonEncode({
         'saved': true,
