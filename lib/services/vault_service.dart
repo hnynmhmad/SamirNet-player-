@@ -80,7 +80,14 @@ class VaultService {
     }), flush: true);
   }
 
-  Future<Map<String, dynamic>> metadataFor(File encryptedFile) async {\n    final id = encryptedFile.uri.pathSegments.last.replaceFirst('.snv', '');\n    final meta = File('${encryptedFile.parent.path}/$id.json');\n    if (!await meta.exists()) return {'name': 'media.bin'};\n    try { return jsonDecode(await meta.readAsString()) as Map<String, dynamic>; } catch (_) { return {'name': 'media.bin'}; }\n  }\n\n  Future<List<File>> listEncryptedFiles() async {
+  Future<Map<String, dynamic>> metadataFor(File encryptedFile) async {
+    final id = encryptedFile.uri.pathSegments.last.replaceFirst('.snv', '');
+    final meta = File('${encryptedFile.parent.path}/$id.json');
+    if (!await meta.exists()) return {'name': 'media.bin'};
+    try { return jsonDecode(await meta.readAsString()) as Map<String, dynamic>; } catch (_) { return {'name': 'media.bin'}; }
+  }
+
+  Future<List<File>> listEncryptedFiles() async {
     final dir = await _directory();
     return dir.listSync().whereType<File>()
         .where((file) => file.path.endsWith('.snv')).toList()
@@ -106,10 +113,18 @@ class VaultService {
     final key = enc.Key(_deriveKey(pin, salt));
     final decrypted = enc.Encrypter(enc.AES(key, mode: enc.AESMode.cbc))
         .decryptBytes(enc.Encrypted(Uint8List.fromList(payload)), iv: iv);
-    final meta = await metadataFor(encryptedFile);\n    final originalName = (meta['name'] as String? ?? 'media.bin').split(RegExp(r'[/\\\\]')).last;\n    final temp = await getTemporaryDirectory();\n    final output = File('${temp.path}/vault_preview_${DateTime.now().microsecondsSinceEpoch}_$originalName');
+    final meta = await metadataFor(encryptedFile);
+    final originalName = (meta['name'] as String? ?? 'media.bin').split(RegExp(r'[/\\\\]')).last;
+    final temp = await getTemporaryDirectory();
+    final output = File('${temp.path}/vault_preview_${DateTime.now().microsecondsSinceEpoch}_$originalName');
     await output.writeAsBytes(decrypted, flush: true);
     return output;
   }
 
-  Future<void> delete(File file) async {\n    if (await file.exists()) await file.delete();\n    final id = file.uri.pathSegments.last.replaceFirst('.snv', '');\n    final meta = File('${file.parent.path}/$id.json');\n    if (await meta.exists()) await meta.delete();\n  }
+  Future<void> delete(File file) async {
+    if (await file.exists()) await file.delete();
+    final id = file.uri.pathSegments.last.replaceFirst('.snv', '');
+    final meta = File('${file.parent.path}/$id.json');
+    if (await meta.exists()) await meta.delete();
+  }
 }
