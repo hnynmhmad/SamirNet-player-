@@ -426,16 +426,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
     controller.seekTo(Duration(milliseconds: targetMs));
     _showControls();
   }
+  double _speedForLongPress(Offset p, Size size) {
+    final rightSide = p.dx >= size.width / 2;
+    final upperHalf = p.dy < size.height / 2;
+    if (rightSide && upperHalf) return 2.0;
+    if (rightSide && !upperHalf) return 1.25;
+    if (!rightSide && upperHalf) return 0.75;
+    return 0.5;
+  }
   Future<void> _beginSpeedBoost(LongPressStartDetails details) async {
     if (locked || !ready || _longPressActive) return;
     _longPressActive = true;
-    await controller.setPlaybackSpeed(2.0);
+    final speed = _speedForLongPress(details.localPosition, MediaQuery.sizeOf(context));
+    await controller.setPlaybackSpeed(speed);
+    if (mounted) setState(() {});
     _showControls();
   }
   Future<void> _endSpeedBoost() async {
     if (!_longPressActive) return;
     _longPressActive = false;
     await controller.setPlaybackSpeed(1.0);
+    if (mounted) setState(() {});
     _showControls();
   }
   @override
