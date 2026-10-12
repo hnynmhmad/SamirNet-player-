@@ -5,11 +5,11 @@ import 'package:samirnet_player/main.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('SamirNet Player renders the application shell', (tester) async {
+  testWidgets('SN Player renders the application shell', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const SamirNetApp());
     await tester.pump();
-    expect(find.text('SamirNet Player'), findsOneWidget);
+    expect(find.text('SN Player'), findsOneWidget);
     expect(find.text('الرئيسية'), findsWidgets);
   });
 }
