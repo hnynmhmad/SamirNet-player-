@@ -844,7 +844,7 @@ class _MusicPlayerScreenState extends State<MusicPlayerScreen> with SingleTicker
             onChanged: (v) => setState(() => _dragPosition = v),
             onChangeEnd: (v) { widget.handler.seek(Duration(milliseconds: v.round())); setState(() => _dragPosition = null); },
           )),
-          Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(_time(position), style: const TextStyle(color: Colors.white54, fontSize: 12)), Text('-${_time(duration - position)}', style: const TextStyle(color: Colors.white54, fontSize: 12))])),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(_time(position), style: const TextStyle(color: Colors.white54, fontSize: 12)), Text('-${_time(duration > position ? duration - position : Duration.zero)}', style: const TextStyle(color: Colors.white54, fontSize: 12))])),
           const SizedBox(height: 20),
           Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
             IconButton(tooltip: _shuffle ? 'إلغاء العشوائي' : 'تشغيل عشوائي', onPressed: () { setState(() => _shuffle = !_shuffle); widget.handler.customAction('setShuffle', {'enabled': _shuffle}); }, color: _shuffle ? coral : Colors.white70, icon: const Icon(Icons.shuffle_rounded)),
@@ -1071,9 +1071,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       final handler = await _getBackgroundAudioHandler();
       final resumePosition = controller.value.position;
-      await handler.customAction('playFileInBackground', {'path': widget.file.path, 'title': widget.entry.name, 'positionMs': resumePosition.inMilliseconds});
+      await prefs.setInt('resume_${widget.entry.id}', resumePosition.inMilliseconds);
+      await handler.customAction('playFileInBackground', {'path': widget.file.path, 'title': 'فيديو · ${widget.entry.name}', 'positionMs': resumePosition.inMilliseconds});
       await controller.pause();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يستمر الصوت فقط في الخلفية مع إشعار التحكم.')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يستمر صوت الفيديو نفسه من موضعه في الخلفية مع إشعار تحكم خاص.')));
     } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الخلفية: $e'))); }
   }
   Future<void> _toggleFullscreen() async {
