@@ -77,10 +77,10 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       if (duration != null && current != null) mediaItem.add(current.copyWith(duration: duration));
     });
   }
-  Future<void> playFileInBackground(File file, String title) async {
-    await playQueueInBackground([file], [title], 0);
+  Future<void> playFileInBackground(File file, String title, {Duration startPosition = Duration.zero}) async {
+    await playQueueInBackground([file], [title], 0, startPosition: startPosition);
   }
-  Future<void> playQueueInBackground(List<File> files, List<String> titles, int initialIndex) async {
+  Future<void> playQueueInBackground(List<File> files, List<String> titles, int initialIndex, {Duration startPosition = Duration.zero}) async {
     if (files.isEmpty || files.length != titles.length) {
       throw ArgumentError('The music queue is empty or invalid');
     }
@@ -93,6 +93,7 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       ConcatenatingAudioSource(children: files.map((file) => AudioSource.file(file.path)).toList()),
       initialIndex: start,
     );
+    if (startPosition > Duration.zero) await _player.seek(startPosition, index: start);
     await _player.play();
   }
   @override
@@ -123,7 +124,8 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       final path = extras?['path'] as String?;
       final title = extras?['title'] as String? ?? 'SM Player';
       if (path == null || path.isEmpty) throw ArgumentError('Missing media file path');
-      await playFileInBackground(File(path), title);
+      final positionMs = extras?['positionMs'] as int? ?? 0;
+      await playFileInBackground(File(path), title, startPosition: Duration(milliseconds: positionMs < 0 ? 0 : positionMs));
     } else if (name == 'setLoopMode') {
       final value = extras?['value'] as String? ?? 'off';
       await _player.setLoopMode(value == 'one' ? LoopMode.one : value == 'all' ? LoopMode.all : LoopMode.off);
@@ -842,14 +844,14 @@ class _MusicPlayerScreenState extends State<MusicPlayerScreen> with SingleTicker
             onChanged: (v) => setState(() => _dragPosition = v),
             onChangeEnd: (v) { widget.handler.seek(Duration(milliseconds: v.round())); setState(() => _dragPosition = null); },
           )),
-          Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(_time(position), style: const TextStyle(color: Colors.white54, fontSize: 12)), Text(_time(duration), style: const TextStyle(color: Colors.white54, fontSize: 12))])),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(_time(position), style: const TextStyle(color: Colors.white54, fontSize: 12)), Text('-${_time(duration - position)}', style: const TextStyle(color: Colors.white54, fontSize: 12))])),
           const SizedBox(height: 20),
           Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
             IconButton(tooltip: _shuffle ? 'إلغاء العشوائي' : 'تشغيل عشوائي', onPressed: () { setState(() => _shuffle = !_shuffle); widget.handler.customAction('setShuffle', {'enabled': _shuffle}); }, color: _shuffle ? coral : Colors.white70, icon: const Icon(Icons.shuffle_rounded)),
             IconButton(onPressed: () => widget.handler.skipToPrevious(), color: Colors.white, iconSize: 38, icon: const Icon(Icons.skip_previous_rounded)),
             Container(width: 72, height: 72, decoration: const BoxDecoration(shape: BoxShape.circle, color: coral, boxShadow: [BoxShadow(color: Color(0x66EF4444), blurRadius: 20)]), child: IconButton(color: Colors.white, iconSize: 40, onPressed: () => state.playing ? widget.handler.pause() : widget.handler.play(), icon: Icon(state.playing ? Icons.pause_rounded : Icons.play_arrow_rounded))),
             IconButton(onPressed: () => widget.handler.skipToNext(), color: Colors.white, iconSize: 38, icon: const Icon(Icons.skip_next_rounded)),
-            IconButton(tooltip: _repeat ? 'تكرار القائمة' : 'تكرار الأغنية', onPressed: () { setState(() => _repeat = !_repeat); widget.handler.customAction('setLoopMode', {'value': _repeat ? 'all' : 'one'}); }, color: _repeat ? coral : Colors.white70, icon: const Icon(Icons.repeat_rounded)),
+            IconButton(tooltip: _repeat ? 'تكرار القائمة' : 'تكرار الأغنية', onPressed: () { setState(() => _repeat = !_repeat); widget.handler.customAction('setLoopMode', {'value': _repeat ? 'all' : 'off'}); }, color: _repeat ? coral : Colors.white70, icon: const Icon(Icons.repeat_rounded)),
           ]),
           const SizedBox(height: 20),
           OutlinedButton.icon(onPressed: _showQueue, icon: const Icon(Icons.queue_music_rounded), label: const Text('عرض قائمة الانتظار'), style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Color(0xFF444444)), padding: const EdgeInsets.symmetric(vertical: 14))),
@@ -1068,7 +1070,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         return;
       }
       final handler = await _getBackgroundAudioHandler();
-      await handler.customAction('playFileInBackground', {'path': widget.file.path, 'title': widget.entry.name});
+      final resumePosition = controller.value.position;
+      await handler.customAction('playFileInBackground', {'path': widget.file.path, 'title': widget.entry.name, 'positionMs': resumePosition.inMilliseconds});
       await controller.pause();
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يستمر الصوت فقط في الخلفية مع إشعار التحكم.')));
     } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الخلفية: $e'))); }
