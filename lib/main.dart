@@ -267,6 +267,583 @@ class _LibraryScreenState extends State<LibraryScreen> {
 }
 
 
+
+class VideosLibraryScreen extends StatefulWidget {
+  const VideosLibraryScreen({required this.entries, required this.initialFavorites, required this.onPlay, required this.onFavorite, super.key});
+  final List<MediaEntry> entries;
+  final Set<String> initialFavorites;
+  final ValueChanged<MediaEntry> onPlay;
+  final ValueChanged<MediaEntry> onFavorite;
+  @override
+  State<VideosLibraryScreen> createState() => _VideosLibraryScreenState();
+}
+class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
+  bool grid = true, selecting = false;
+  String sort = 'nameAsc';
+  final Set<String> selected = {};
+  List<MediaEntry> get sorted {
+    final result = [...widget.entries];
+    result.sort((a,b) {
+      switch (sort) {
+        case 'nameDesc': return b.name.toLowerCase().compareTo(a.name.toLowerCase());
+        case 'durationDesc': return b.duration.compareTo(a.duration);
+        case 'durationAsc': return a.duration.compareTo(b.duration);
+        case 'nameAsc':
+        default: return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      }
+    });
+    return result;
+  }
+  Future<void> _shareExternal() async {
+    final files = <XFile>[];
+    for (final entry in sorted.where((v) => selected.contains(v.id))) {
+      final file = await entry.asset.file;
+      if (file != null) files.add(XFile(file.path, name: entry.name));
+    }
+    if (files.isEmpty) return;
+    await Share.shareXFiles(files, text: 'مشاركة من SN Player');
+  }
+  void _toggleSelect(MediaEntry e) => setState(() {
+    if (!selected.add(e.id)) selected.remove(e.id);
+    selecting = selected.isNotEmpty;
+  });
+  @override
+  Widget build(BuildContext context) {
+    final items = sorted;
+    return Directionality(textDirection: TextDirection.rtl, child: Scaffold(
+      appBar: AppBar(title: Text(selecting ? 'تم تحديد ${selected.length} فيديو' : 'كل الفيديوهات'), actions: [
+        if (selecting) IconButton(tooltip: 'مشاركة مع التطبيقات', onPressed: _shareExternal, icon: const Icon(Icons.share)),
+        if (selecting) IconButton(tooltip: 'إرسال عبر SN Player', onPressed: () {
+          final files = items.where((v) => selected.contains(v.id)).toList();
+          Navigator.push(context, MaterialPageRoute(builder: (_) => InternalSendScreen(entries: files)));
+        }, icon: const Icon(Icons.send_rounded)),
+        IconButton(tooltip: 'تغيير العرض', onPressed: () => setState(() => grid = !grid), icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
+        PopupMenuButton<String>(tooltip: 'ترتيب الفيديوهات', icon: const Icon(Icons.sort), onSelected: (v) => setState(() => sort = v), itemBuilder: (_) => const [
+          PopupMenuItem(value: 'nameAsc', child: Text('الاسم: أ إلى ي')),
+          PopupMenuItem(value: 'nameDesc', child: Text('الاسم: ي إلى أ')),
+          PopupMenuItem(value: 'nameAZ', child: Text('الاسم: A إلى Z')),
+          PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')),
+          PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا')),
+        ]),
+      ]),
+      body: items.isEmpty ? const Center(child: Text('لا توجد فيديوهات')) : grid
+        ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: items.length, gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 240, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: .78), itemBuilder: (_,i) {
+            final e=items[i]; final picked=selected.contains(e.id);
+            return Card(clipBehavior: Clip.antiAlias, child: InkWell(onTap: () { if (selecting) _toggleSelect(e); else widget.onPlay(e); }, onLongPress: () => _toggleSelect(e), child: Column(children: [
+              Expanded(child: Stack(fit: StackFit.expand, children: [
+                FutureBuilder<Uint8List?>(future: e.asset.thumbnailDataWithSize(const ThumbnailSize(480,320)), builder: (_,s) => s.data == null ? const ColoredBox(color: Colors.black12, child: Icon(Icons.movie, size: 40)) : Image.memory(s.data!, fit: BoxFit.cover)),
+                if (selecting) Positioned(top: 4,right:4,child: Icon(picked ? Icons.check_circle : Icons.radio_button_unchecked,color: picked ? coral : Colors.white,size:28)),
+                Positioned(bottom:5,left:5,child: Container(padding: const EdgeInsets.all(4), color: Colors.black87, child: Text(_formatDuration(e.duration),style: const TextStyle(color:Colors.white,fontSize:11)))),
+              ])),
+              Padding(padding: const EdgeInsets.all(8), child: Text(e.name,maxLines:2,overflow:TextOverflow.ellipsis)),
+            ])));
+          })
+        : ListView.builder(padding: const EdgeInsets.all(12), itemCount: items.length, itemBuilder: (_,i) {
+            final e=items[i]; final picked=selected.contains(e.id);
+            return Card(child: ListTile(onLongPress: () => _toggleSelect(e), onTap: () { if (selecting) _toggleSelect(e); else widget.onPlay(e); }, leading: SizedBox(width:80,height:60,child: FutureBuilder<Uint8List?>(future:e.asset.thumbnailDataWithSize(const ThumbnailSize(160,120)),builder:(_,s)=>s.data==null?const Icon(Icons.movie):Image.memory(s.data!,fit:BoxFit.cover))),title: Text(e.name,maxLines:2,overflow:TextOverflow.ellipsis),subtitle: Text(_formatDuration(e.duration)),trailing: selecting ? Icon(picked?Icons.check_circle:Icons.radio_button_unchecked,color:coral) : const Icon(Icons.play_arrow)));
+          }),
+    ));
+  }
+}
+
+class AudioLibraryScreen extends StatefulWidget {
+  const AudioLibraryScreen({required this.onPlay, super.key});
+  final ValueChanged<MediaEntry> onPlay;
+  @override
+  State<AudioLibraryScreen> createState() => _AudioLibraryScreenState();
+}
+class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
+  bool loading=true;
+  String? error;
+  List<MediaEntry> audio=[];
+  @override
+  void initState(){super.initState();_load();}
+  Future<void> _load() async {
+    try {
+      final permission=await PhotoManager.requestPermissionExtend();
+      if(!permission.isAuth && !permission.hasAccess) { setState(()=>error='اسمح بالوصول إلى ملفات الوسائط من إعدادات Android.'); return; }
+      final paths=await PhotoManager.getAssetPathList(type:RequestType.audio,onlyAll:true);
+      final assets=paths.isEmpty?<AssetEntity>[]:await paths.first.getAssetListRange(start:0,end:2000);
+      if(mounted)setState(()=>audio=assets.map(MediaEntry.new).toList());
+    } catch(e) { if(mounted)setState(()=>error='تعذر تحميل الصوتيات: $e'); }
+    finally { if(mounted)setState(()=>loading=false);}
+  }
+  @override
+  Widget build(BuildContext context)=>Directionality(textDirection:TextDirection.rtl,child:Scaffold(appBar:AppBar(title:const Text('الصوتيات')),body:loading?const Center(child:CircularProgressIndicator()):error!=null?Center(child:Padding(padding:const EdgeInsets.all(20),child:Text(error!))):audio.isEmpty?const Center(child:Text('لم يتم العثور على ملفات صوتية')):ListView.builder(itemCount:audio.length,itemBuilder:(context,i){final e=audio[i];return ListTile(leading:const CircleAvatar(backgroundColor:Color(0x223979D5),child:Icon(Icons.music_note,color:Color(0xFF3979D5))),title:Text(e.name,maxLines:2,overflow:TextOverflow.ellipsis),subtitle:Text(_formatDuration(e.duration)),trailing:const Icon(Icons.play_arrow),onTap:()=>widget.onPlay(e));})));
+}
+
+class InternalSendScreen extends StatefulWidget {
+  const InternalSendScreen({required this.entries,super.key});
+  final List<MediaEntry> entries;
+  @override
+  State<InternalSendScreen> createState()=>_InternalSendScreenState();
+}
+class _InternalSendScreenState extends State<InternalSendScreen>{
+  final url=TextEditingController();
+  final token=TextEditingController();
+  bool sending=false;
+  String status='أدخل عنوان جهاز الاستقبال ورمز المصادقة الظاهرين في SN Player على الجهاز الآخر.';
+  @override
+  void dispose(){url.dispose();token.dispose();super.dispose();}
+  Future<void> _send() async {
+    final base=url.text.trim().replaceAll(RegExp(r'/+
+  const FolderVideosScreen({required this.title, required this.entries, required this.onPlay, required this.isFavorite, required this.onFavorite, super.key});
+  final String title;
+  final List<MediaEntry> entries;
+  final ValueChanged<MediaEntry> onPlay;
+  final bool Function(MediaEntry) isFavorite;
+  final ValueChanged<MediaEntry> onFavorite;
+
+  @override
+  Widget build(BuildContext context) => Directionality(
+    textDirection: TextDirection.rtl,
+    child: Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: entries.isEmpty
+        ? const Center(child: Text('لا توجد فيديوهات في هذا المجلد'))
+        : ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: entries.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final entry = entries[index];
+              return Card(child: ListTile(
+                leading: const CircleAvatar(backgroundColor: Color(0x22EF4444), child: Icon(Icons.movie_outlined, color: coral)),
+                title: Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+                subtitle: Text(_formatDuration(entry.duration)),
+                trailing: IconButton(onPressed: () => onFavorite(entry), icon: Icon(isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: coral)),
+                onTap: () => onPlay(entry),
+              ));
+            },
+          ),
+    ),
+  );
+}
+
+String _formatDuration(Duration d) {
+  final h = d.inHours;
+  final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+  return h > 0 ? '$h:$m:$s' : '$m:$s';
+}
+
+class PlayerScreen extends StatefulWidget {
+  const PlayerScreen({required this.entry, required this.file, required this.favorite, required this.onFavorite, super.key});
+  final MediaEntry entry; final File file; final bool favorite; final VoidCallback onFavorite;
+  @override
+  State<PlayerScreen> createState() => _PlayerScreenState();
+}
+class _PlayerScreenState extends State<PlayerScreen> {
+  late final VideoPlayerController controller;
+  bool ready = false, controls = true, locked = false, fillScreen = false, _longPressActive = false;
+  Duration _seekStartPosition = Duration.zero;
+  String? subtitleText;
+  Duration subtitleOffset = Duration.zero;
+  double? subtitleSize;
+  Offset? _gestureStart;
+  double _startLevel = .5;
+  bool _brightnessGesture = false;
+  Timer? _hideTimer;
+  DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
+  @override
+  void initState() {
+    super.initState();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight, DeviceOrientation.portraitUp]);
+    controller = VideoPlayerController.file(widget.file);
+    controller.initialize().then((_) async {
+      final prefs = await SharedPreferences.getInstance();
+      final resume = prefs.getInt('resume_${widget.entry.id}') ?? 0;
+      if (resume > 0 && resume < controller.value.duration.inMilliseconds - 3000) {
+        await controller.seekTo(Duration(milliseconds: resume));
+      }
+      if (mounted) setState(() => ready = true);
+      await controller.play();
+      _scheduleHide();
+    }).catchError((Object error) {
+      if (mounted) setState(() => ready = false);
+    });
+    controller.addListener(_update);
+  }
+  void _update() {
+    if (!mounted) return;
+    if (controller.value.isInitialized && DateTime.now().difference(_lastSaved).inSeconds >= 5) {
+      _lastSaved = DateTime.now();
+      SharedPreferences.getInstance().then((p) => p.setInt('resume_${widget.entry.id}', controller.value.position.inMilliseconds));
+    }
+    setState(() {});
+  }
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    if (controls && !locked && controller.value.isPlaying) {
+      _hideTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) setState(() => controls = false);
+      });
+    }
+  }
+  void _showControls() {
+    setState(() => controls = true);
+    _scheduleHide();
+  }
+  Future<void> _loadSubtitle() async {
+    final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['srt', 'vtt', 'txt']);
+    final path = picked?.files.singleOrNull?.path;
+    if (path == null) return;
+    try {
+      final text = await File(path).readAsString();
+      if (mounted) setState(() => subtitleText = text);
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذرت قراءة ملف الترجمة')));
+    }
+  }
+  String? _subtitleAt(Duration position) {
+    final raw = subtitleText;
+    if (raw == null) return null;
+    final adjusted = position + subtitleOffset;
+    for (final block in raw.replaceAll('\r', '').split(RegExp(r'\n\s*\n'))) {
+      final lines = block.split('\n').where((line) => line.trim().isNotEmpty).toList();
+      final index = lines.indexWhere((line) => line.contains('-->'));
+      if (index < 0) continue;
+      final times = lines[index].split('-->');
+      if (times.length != 2) continue;
+      Duration parse(String input) {
+        final parts = input.trim().replaceAll(',', '.').split(':');
+        if (parts.length != 3) return Duration.zero;
+        final sec = parts[2].split('.');
+        return Duration(hours: int.tryParse(parts[0]) ?? 0, minutes: int.tryParse(parts[1]) ?? 0, seconds: int.tryParse(sec[0]) ?? 0, milliseconds: sec.length > 1 ? int.tryParse(sec[1].padRight(3, '0').substring(0, 3)) ?? 0 : 0);
+      }
+      if (adjusted >= parse(times[0]) && adjusted <= parse(times[1])) return lines.skip(index + 1).join('\n').replaceAll(RegExp(r'<[^>]*>'), '');
+    }
+    return null;
+  }
+  void _gestureStartAt(DragStartDetails d) {
+    _gestureStart = d.localPosition;
+    _brightnessGesture = d.localPosition.dx < MediaQuery.sizeOf(context).width / 2;
+    _startLevel = .5;
+    if (_brightnessGesture) {
+      ScreenBrightness().current.then((v) => _startLevel = v);
+    } else {
+      VolumeController().getVolume().then((v) => _startLevel = v);
+    }
+  }
+  void _gestureUpdate(DragUpdateDetails d) {
+    final start = _gestureStart;
+    if (start == null) return;
+    final level = (_startLevel + (start.dy - d.localPosition.dy) / MediaQuery.sizeOf(context).height * 2).clamp(0.0, 1.0);
+    if (_brightnessGesture) { ScreenBrightness().setScreenBrightness(level); }
+    else { VolumeController().setVolume(level); }
+  }
+  Future<void> _toggleFullscreen() async {
+    final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
+    await SystemChrome.setPreferredOrientations(landscape ? [DeviceOrientation.portraitUp] : [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+    if (mounted) setState(() {});
+  }
+  void _horizontalSeekStart(DragStartDetails d) {
+    _gestureStart = d.localPosition;
+    _seekStartPosition = controller.value.position;
+    _showControls();
+  }
+  void _horizontalSeekUpdate(DragUpdateDetails d) {
+    final start = _gestureStart;
+    if (start == null || controller.value.duration <= Duration.zero) return;
+    final delta = d.localPosition.dx - start.dx;
+    final seconds = (delta / MediaQuery.sizeOf(context).width * 120).round();
+    final targetMs = (_seekStartPosition.inMilliseconds + seconds * 1000).clamp(0, controller.value.duration.inMilliseconds);
+    controller.seekTo(Duration(milliseconds: targetMs));
+    _showControls();
+  }
+  double _speedForLongPress(Offset p, Size size) {
+    final rightSide = p.dx >= size.width / 2;
+    final upperHalf = p.dy < size.height / 2;
+    if (rightSide && upperHalf) return 2.0;
+    if (rightSide && !upperHalf) return 1.25;
+    if (!rightSide && upperHalf) return 0.75;
+    return 0.5;
+  }
+  Future<void> _beginSpeedBoost(LongPressStartDetails details) async {
+    if (locked || !ready || _longPressActive) return;
+    _longPressActive = true;
+    final speed = _speedForLongPress(details.localPosition, MediaQuery.sizeOf(context));
+    await controller.setPlaybackSpeed(speed);
+    if (mounted) setState(() {});
+    _showControls();
+  }
+  Future<void> _endSpeedBoost() async {
+    if (!_longPressActive) return;
+    _longPressActive = false;
+    await controller.setPlaybackSpeed(1.0);
+    if (mounted) setState(() {});
+    _showControls();
+  }
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    controller.removeListener(_update);
+    controller.dispose();
+    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    super.dispose();
+  }
+  void _seek(int seconds) { final target = controller.value.position + Duration(seconds: seconds); controller.seekTo(target < Duration.zero ? Duration.zero : target); }
+  String _time(Duration d) { final h = d.inHours; final m = d.inMinutes.remainder(60).toString().padLeft(2, '0'); final s = d.inSeconds.remainder(60).toString().padLeft(2, '0'); return h > 0 ? '$h:$m:$s' : '$m:$s'; }
+  @override
+  Widget build(BuildContext context) {
+    final v = controller.value;
+    return Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTap: () {}, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, onLongPressStart: locked ? null : _beginSpeedBoost, onLongPressEnd: locked ? null : (_) => _endSpeedBoost(), onHorizontalDragStart: locked ? null : _horizontalSeekStart, onHorizontalDragUpdate: locked ? null : _horizontalSeekUpdate, onHorizontalDragEnd: (_) => _gestureStart = null, onVerticalDragStart: locked ? null : _gestureStartAt, onVerticalDragUpdate: locked ? null : _gestureUpdate, onVerticalDragEnd: (_) => _gestureStart = null, child: Stack(alignment: Alignment.center, children: [
+      if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: VideoPlayer(controller)))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: VideoPlayer(controller))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
+      if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),
+      if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
+        Row(children: [IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)), Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))), IconButton(onPressed: widget.onFavorite, icon: Icon(widget.favorite ? Icons.favorite : Icons.favorite_border, color: coral)), PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
+          if (value.startsWith('speed:')) controller.setPlaybackSpeed(double.parse(value.substring(6)));
+          if (value == 'fit') setState(() => fillScreen = !fillScreen);
+          if (value == 'rotate') _toggleFullscreen();
+          if (value == 'subtitle') _loadSubtitle();
+          if (value == 'subminus') setState(() => subtitleOffset -= const Duration(milliseconds: 500));
+          if (value == 'subplus') setState(() => subtitleOffset += const Duration(milliseconds: 500));
+          if (value == 'subsize') setState(() => subtitleSize = (subtitleSize ?? 22) >= 30 ? 16 : (subtitleSize ?? 22) + 2);
+        }, itemBuilder: (_) => [
+          const PopupMenuItem(value: 'fit', child: Text('تبديل ملء الشاشة / احتواء')),
+          const PopupMenuItem(value: 'rotate', child: Text('تدوير الشاشة')),
+          const PopupMenuItem(value: 'subtitle', child: Text('اختيار ملف ترجمة')),
+          const PopupMenuItem(value: 'subminus', child: Text('تأخير الترجمة -0.5 ثانية')),
+          const PopupMenuItem(value: 'subplus', child: Text('تقديم الترجمة +0.5 ثانية')),
+          const PopupMenuItem(value: 'subsize', child: Text('تكبير / تصغير الترجمة')),
+          const PopupMenuDivider(),
+          ...[0.5, .75, 1.0, 1.25, 1.5, 2.0].map((s) => PopupMenuItem(value: 'speed:$s', child: Text('سرعة $s×'))),
+        ])]),
+        const Spacer(),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [IconButton(onPressed: () => _seek(-10), icon: const Icon(Icons.replay_10, color: Colors.white, size: 36)), const SizedBox(width: 24), IconButton(onPressed: () => v.isPlaying ? controller.pause() : controller.play(), icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white, size: 64)), const SizedBox(width: 24), IconButton(onPressed: () => _seek(10), icon: const Icon(Icons.forward_10, color: Colors.white, size: 36))]),
+        const Spacer(),
+        Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: Column(children: [
+          VideoProgressIndicator(controller, allowScrubbing: true, colors: const VideoProgressColors(playedColor: coral, bufferedColor: Colors.white38, backgroundColor: Colors.white24)),
+          Row(children: [Text(_time(v.position), style: const TextStyle(color: Colors.white, fontSize: 12)), const Spacer(), Text('-${_time(v.duration - v.position)}', style: const TextStyle(color: Colors.white, fontSize: 12)), IconButton(tooltip: 'ملء الشاشة / احتواء', onPressed: () => setState(() => fillScreen = !fillScreen), icon: Icon(fillScreen ? Icons.fit_screen : Icons.fullscreen, color: Colors.white)), IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)), IconButton(tooltip: 'قفل اللمس', onPressed: () { setState(() => locked = true); _hideTimer?.cancel(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); }, icon: const Icon(Icons.lock_open, color: Colors.white))]),
+        ])),
+      ])))),
+      if (locked) Positioned(left: 16, bottom: 32, child: IconButton.filledTonal(onPressed: () { setState(() { locked = false; controls = true; }); SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); }, icon: const Icon(Icons.lock))),
+    ]))));
+  }
+}
+
+class VaultScreen extends StatefulWidget {
+  const VaultScreen({super.key});
+  @override
+  State<VaultScreen> createState() => _VaultScreenState();
+}
+
+class _VaultScreenState extends State<VaultScreen> {
+  bool busy = false;
+  List<File> files = [];
+  @override
+  void initState() { super.initState(); _refresh(); }
+  Future<void> _refresh() async {
+    final list = await VaultService.instance.listEncryptedFiles();
+    if (mounted) setState(() => files = list);
+  }
+  Future<String?> _askPin({required String title}) async {
+    final controller = TextEditingController();
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(controller: controller, autofocus: true, obscureText: true,
+          keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'الرقم السري', helperText: 'أدخل 4 أرقام أو أكثر')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('متابعة')),
+        ],
+      ),
+    );
+    controller.dispose();
+    return value;
+  }
+  Future<String?> _ensurePin() async {
+    final service = VaultService.instance;
+    final configured = await service.isConfigured;
+    final pin = await _askPin(title: configured ? 'فتح الخزنة' : 'إنشاء رقم سري للخزنة');
+    if (pin == null || pin.isEmpty) return null;
+    if (configured) {
+      if (!await service.verifyPin(pin)) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('الرقم السري غير صحيح')));
+        return null;
+      }
+    } else {
+      if (pin.length < 4) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('استخدم 4 أرقام أو أكثر')));
+        return null;
+      }
+      await service.setPin(pin);
+    }
+    return pin;
+  }
+  Future<void> _import() async {
+    final pin = await _ensurePin();
+    if (pin == null) return;
+    final picked = await FilePicker.platform.pickFiles(allowMultiple: false);
+    final path = picked?.files.singleOrNull?.path;
+    if (path == null) return;
+    setState(() => busy = true);
+    try {
+      await VaultService.instance.importFile(File(path), pin);
+      await _refresh();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم تشفير الملف ونقله إلى الخزنة')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشفير الملف: $e')));
+    } finally { if (mounted) setState(() => busy = false); }
+  }
+  Future<void> _restore(File file) async {
+    final pin = await _ensurePin();
+    if (pin == null) return;
+    setState(() => busy = true);
+    try {
+      final temp = await VaultService.instance.decryptToTemporary(file, pin);
+      final meta = await VaultService.instance.metadataFor(file);
+      final originalName = meta['name'] as String? ?? 'restored_media.bin';
+      final destination = await FilePicker.platform.saveFile(fileName: originalName);
+      if (destination != null) {
+        await temp.copy(destination);
+        await temp.delete();
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم فك التشفير وحفظ النسخة التي اخترتها')));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر فك التشفير: $e')));
+    } finally { if (mounted) setState(() => busy = false); }
+  }
+  Future<void> _delete(File file) async {
+    final confirm = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('حذف الملف المشفر؟'),
+      content: const Text('سيتم حذف النسخة المشفرة من الخزنة.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('حذف'))],
+    ));
+    if (confirm == true) { await VaultService.instance.delete(file); await _refresh(); }
+  }
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('الخزنة الخاصة')),
+    floatingActionButton: FloatingActionButton.extended(onPressed: busy ? null : _import, icon: const Icon(Icons.add_to_drive), label: const Text('إضافة ملف')),
+    body: busy ? const Center(child: CircularProgressIndicator(color: coral)) : files.isEmpty
+      ? Center(child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.enhanced_encryption, size: 64, color: coral),
+          const SizedBox(height: 16), const Text('خزنتك الخاصة', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8), const Text('تُحفظ الملفات داخل مساحة التطبيق بصيغة مشفرة AES. احفظ رقمك السري؛ لا توجد طريقة لاستعادة الملفات بدونه.', textAlign: TextAlign.center),
+          const SizedBox(height: 16), FilledButton.icon(onPressed: _import, icon: const Icon(Icons.add), label: const Text('تشفير ملف وإضافته')),
+        ])))
+      : ListView(padding: const EdgeInsets.all(16), children: [
+          const Text('الملفات المشفرة', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          ...files.map((file) => Card(child: ListTile(
+            leading: const CircleAvatar(backgroundColor: Color(0x1AEF4444), child: Icon(Icons.lock, color: coral)),
+            title: FutureBuilder<Map<String, dynamic>>(future: VaultService.instance.metadataFor(file), builder: (_, snap) => Text(snap.data?['name'] as String? ?? 'ملف خاص ${files.indexOf(file) + 1}')),
+            subtitle: Text('${(file.lengthSync() / 1024).toStringAsFixed(1)} كيلوبايت · مشفر'),
+            onTap: () => _restore(file),
+            trailing: PopupMenuButton<String>(onSelected: (v) => v == 'restore' ? _restore(file) : _delete(file), itemBuilder: (_) => const [
+              PopupMenuItem(value: 'restore', child: Text('فك التشفير / استعادة')),
+              PopupMenuItem(value: 'delete', child: Text('حذف نهائي')),
+            ]),
+          ))),
+          const SizedBox(height: 90),
+        ]),
+  );
+}
+
+class WifiTransferScreen extends StatefulWidget {
+  const WifiTransferScreen({super.key});
+  @override
+  State<WifiTransferScreen> createState() => _WifiTransferScreenState();
+}
+
+class _WifiTransferScreenState extends State<WifiTransferScreen> {
+  final WifiTransferService service = WifiTransferService();
+  bool busy = false;
+  List<String> addresses = [];
+  String? error;
+  Future<void> _start() async {
+    setState(() { busy = true; error = null; });
+    try {
+      await service.start();
+      addresses = await service.localIpv4Addresses;
+      if (addresses.isEmpty) error = 'لم يتم العثور على عنوان شبكة محلية. تأكد من اتصال الهاتف بشبكة Wi-Fi.';
+    } catch (e) { error = 'تعذر بدء خادم النقل: $e'; }
+    if (mounted) setState(() => busy = false);
+  }
+  Future<void> _stop() async {
+    setState(() => busy = true);
+    await service.stop();
+    if (mounted) setState(() { busy = false; addresses = []; });
+  }
+  @override
+  void dispose() { service.stop(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('نقل الملفات عبر Wi-Fi')),
+    body: ListView(padding: const EdgeInsets.all(18), children: [
+      Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(22)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Icon(Icons.wifi_tethering, size: 42, color: coral),
+        const SizedBox(height: 12),
+        Text(service.isRunning ? 'الخادم يعمل' : 'استقبال ملفات من جهاز آخر', style: const TextStyle(fontSize: 21, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        const Text('صل الجهازان بشبكة Wi-Fi نفسها. يتطلب الإرسال طلب HTTP مع رمز المصادقة، وتُعرض بصمة SHA-256 بعد حفظ الملف. أوقف الخادم بعد الانتهاء.'),
+        const SizedBox(height: 16),
+        if (service.isRunning) ...[
+          const Text('عنوان الخادم', style: TextStyle(fontWeight: FontWeight.bold)),
+          ...addresses.map((ip) => SelectableText('http://$ip:${service.port}')),
+          const SizedBox(height: 12),
+          const Text('رمز المصادقة (خاص بك)', style: TextStyle(fontWeight: FontWeight.bold)),
+          SelectableText(service.token ?? ''),
+          const SizedBox(height: 12),
+          const Text('نقطة استقبال: POST /upload?name=filename.mp4\\nالترويسة: Authorization: Bearer TOKEN', style: TextStyle(fontSize: 12)),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(onPressed: busy ? null : _stop, icon: const Icon(Icons.stop_circle_outlined), label: const Text('إيقاف الاستقبال')),
+        ] else FilledButton.icon(onPressed: busy ? null : _start, icon: const Icon(Icons.play_arrow), label: const Text('بدء استقبال الملفات')),
+        if (busy) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
+        if (error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(error!, style: const TextStyle(color: coral))),
+      ])),
+      const SizedBox(height: 16),
+      const ListTile(leading: Icon(Icons.verified_user_outlined), title: Text('حماية برمز عشوائي'), subtitle: Text('الطلبات التي لا تحمل رمز المصادقة تُرفض.')),
+      const ListTile(leading: Icon(Icons.fingerprint), title: Text('فحص سلامة الملف'), subtitle: Text('يُرجع الخادم حجم الملف وبصمة SHA-256 بعد استلامه.')),
+      const ListTile(leading: Icon(Icons.folder_outlined), title: Text('مكان الملفات المستلمة'), subtitle: Text('داخل مساحة التطبيق الخاصة، مجلد wifi_received.')),
+    ]),
+  );
+}
+),'');
+    if(base.isEmpty||token.text.trim().isEmpty){setState(()=>status='أدخل عنوان الاستقبال والرمز أولًا.');return;}
+    setState(()=>sending=true);
+    var sent=0;
+    try {
+      for(final entry in widget.entries){
+        final file=await entry.asset.file;
+        if(file==null)continue;
+        final client=HttpClient();
+        try{
+          final uri=Uri.parse('$base/upload?name=${Uri.encodeComponent(entry.name)}');
+          final request=await client.postUrl(uri);
+          request.headers.set(HttpHeaders.authorizationHeader,'Bearer ${token.text.trim()}');
+          request.headers.contentType=ContentType.binary;
+          request.contentLength=await file.length();
+          await request.addStream(file.openRead());
+          final response=await request.close();
+          final body=await utf8.decoder.bind(response).join();
+          if(response.statusCode<200||response.statusCode>=300)throw HttpException('فشل إرسال ${entry.name}: $body');
+          sent++;
+        } finally {client.close(force:true);}
+      }
+      if(mounted)setState(()=>status='اكتمل الإرسال: $sent من ${widget.entries.length} ملف.');
+    } catch(e){if(mounted)setState(()=>status='توقف الإرسال بعد $sent ملف. السبب: $e');}
+    finally {if(mounted)setState(()=>sending=false);}
+  }
+  @override
+  Widget build(BuildContext context)=>Directionality(textDirection:TextDirection.rtl,child:Scaffold(appBar:AppBar(title:const Text('إرسال عبر SN Player')),body:ListView(padding:const EdgeInsets.all(16),children:[
+    Text('الملفات المحددة: ${widget.entries.length}',style:const TextStyle(fontWeight:FontWeight.bold,fontSize:18)),
+    const SizedBox(height:14),
+    TextField(controller:url,keyboardType:TextInputType.url,decoration:const InputDecoration(labelText:'عنوان جهاز الاستقبال',hintText:'http://192.168.1.10:12345')),
+    const SizedBox(height:10),
+    TextField(controller:token,decoration:const InputDecoration(labelText:'رمز المصادقة')),
+    const SizedBox(height:14),
+    FilledButton.icon(onPressed:sending?null:_send,icon:const Icon(Icons.send),label:Text(sending?'جارٍ الإرسال...':'إرسال الملفات')),
+    const SizedBox(height:12),Text(status),
+    const SizedBox(height:10),const Text('على الجهاز المستقبِل افتح نقل الملفات عبر Wi-Fi وابدأ الاستقبال، ثم انسخ العنوان والرمز إلى هنا. يجب أن يكون الجهازان على الشبكة نفسها.'),
+  ])));
+}
+
 class FolderVideosScreen extends StatelessWidget {
   const FolderVideosScreen({required this.title, required this.entries, required this.onPlay, required this.isFavorite, required this.onFavorite, super.key});
   final String title;
