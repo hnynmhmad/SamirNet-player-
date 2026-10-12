@@ -247,7 +247,7 @@ jobs:
           if 'android:name=".MainActivity"' not in manifest and 'android:name="com.samirnet.snplayer.MainActivity"' not in manifest:
               raise SystemExit('Android manifest does not declare the expected MainActivity')
           import re
-          pattern = r'(<activity\\b(?=[^>]*android:name="(?:\\.MainActivity|com\\.samirnet\\.snplayer\\.MainActivity)")[^>]*)(>)'
+          pattern = r'(<activity\b(?=[^>]*android:name="(?:\.MainActivity|com\.samirnet\.snplayer\.MainActivity)")[^>]*)(>)'
           def add_pip(match):
               tag = match.group(1)
               if 'android:supportsPictureInPicture=' not in tag:
