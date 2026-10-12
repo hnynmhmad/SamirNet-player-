@@ -18,26 +18,25 @@ import 'services/wifi_transfer_service.dart';
 const coral = Color(0xFFEF4444);
 const ink = Color(0xFF111827);
 
-late final AudioHandler backgroundAudioHandler;
+// Background audio is optional. Do not initialize its Android service during app startup:
+// a service/notification configuration problem must never prevent the main UI from opening.
+Future<AudioHandler>? _backgroundAudioHandlerFuture;
+
+Future<AudioHandler> _getBackgroundAudioHandler() {
+  return _backgroundAudioHandlerFuture ??= AudioService.init(
+    builder: () => SNBackgroundAudioHandler(),
+    config: const AudioServiceConfig(
+      androidNotificationChannelId: 'com.samirnet.player.audio',
+      androidNotificationChannelName: 'SM Player playback',
+      androidNotificationOngoing: true,
+      androidStopForegroundOnPause: true,
+    ),
+  );
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  try {
-    backgroundAudioHandler = await AudioService.init(
-      builder: () => SNBackgroundAudioHandler(),
-      config: const AudioServiceConfig(
-        androidNotificationChannelId: 'com.samirnet.player.audio',
-        androidNotificationChannelName: 'SM Player playback',
-        androidNotificationOngoing: true,
-        androidStopForegroundOnPause: true,
-      ),
-    );
-  } catch (error, stackTrace) {
-    // Keep the main player usable even if the optional background service fails.
-    debugPrint('SM Player: background audio initialization failed: $error');
-    debugPrintStack(stackTrace: stackTrace);
-    backgroundAudioHandler = SNBackgroundAudioHandler();
-  }
+  // Keep startup minimal and resilient; media permissions are requested after the UI appears.
   runApp(const SamirNetApp());
 }
 
@@ -626,7 +625,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
   Future<void> _startBackgroundAudio() async {
     try {
-      await backgroundAudioHandler.customAction('playFileInBackground', {'path': widget.file.path, 'title': widget.entry.name});
+      final handler = await _getBackgroundAudioHandler();
+      await handler.customAction('playFileInBackground', {'path': widget.file.path, 'title': widget.entry.name});
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يستمر الصوت في الخلفية مع إشعار التحكم. يمكنك الخروج من التطبيق.')));
     } catch (e) {
