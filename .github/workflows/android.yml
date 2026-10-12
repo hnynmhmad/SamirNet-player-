@@ -43,16 +43,17 @@ jobs:
               inset = int(size * .08)
               d.rounded_rectangle((inset, inset, size-inset-1, size-inset-1),
                                   radius=int(size*.22), fill=(220, 38, 38, 255))
-              # White screen body
-              x0, y0, x1, y1 = int(size*.22), int(size*.29), int(size*.78), int(size*.70)
+              # White video-camera/screen glyph on the red background.
+              x0, y0, x1, y1 = int(size*.20), int(size*.29), int(size*.68), int(size*.71)
               d.rounded_rectangle((x0, y0, x1, y1), radius=int(size*.07), fill='white')
-              # Red play triangle
-              d.polygon([(int(size*.43), int(size*.37)),
-                         (int(size*.43), int(size*.62)),
-                         (int(size*.63), int(size*.495))], fill=(239, 68, 68, 255))
-              # Small camera tabs at the top suggest a video clapper/screen.
-              d.rounded_rectangle((int(size*.29), int(size*.22), int(size*.71), int(size*.31)),
-                                  radius=max(1, int(size*.025)), fill='white')
+              d.polygon([(int(size*.68), int(size*.39)),
+                         (int(size*.84), int(size*.30)),
+                         (int(size*.84), int(size*.70)),
+                         (int(size*.68), int(size*.61))], fill='white')
+              # Red play cutout makes the white video symbol recognizable at small sizes.
+              d.polygon([(int(size*.37), int(size*.39)),
+                         (int(size*.37), int(size*.61)),
+                         (int(size*.54), int(size*.50))], fill=(220, 38, 38, 255))
               image.save(root / f'mipmap-{density}' / 'ic_launcher.png')
           drawable = root / 'drawable'
           drawable.mkdir(parents=True, exist_ok=True)
@@ -228,7 +229,7 @@ jobs:
               if '<application' not in text:
                   raise SystemExit('AndroidManifest.xml has no application element')
               text = text.replace('<application', element + '\n    <application', 1)
-          text = text.replace('android:label="samirnet_player"', 'android:label="SN Player"')
+          text = text.replace('android:label="samirnet_player"', 'android:label="SM Player"')
           service = '''        <service
                       android:name="com.ryanheise.audioservice.AudioService"
                       android:foregroundServiceType="mediaPlayback"
@@ -252,7 +253,7 @@ jobs:
           for permission in permissions:
               if permission not in path.read_text():
                   raise SystemExit('Missing media permission: ' + permission)
-          print('Verified Android media permissions, manifest XML, and SN Player label')
+          print('Verified Android media permissions, manifest XML, and SM Player label')
           PY
       - name: Resolve dependencies
         run: flutter pub get
