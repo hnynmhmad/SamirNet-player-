@@ -25,6 +25,78 @@ jobs:
           cache: true
       - name: Generate Android platform files
         run: flutter create --platforms=android --org com.samirnet .
+      - name: Create SN Player launcher icon
+        shell: bash
+        run: |
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw
+          import math
+
+          root = Path('android/app/src/main/res')
+          sizes = {'mdpi':48, 'hdpi':72, 'xhdpi':96, 'xxhdpi':144, 'xxxhdpi':192}
+          for density, size in sizes.items():
+              image = Image.new('RGBA', (size, size), (239, 68, 68, 255))
+              d = ImageDraw.Draw(image)
+              # Soft inset rounded-square badge and a clear white video/play mark.
+              inset = int(size * .08)
+              d.rounded_rectangle((inset, inset, size-inset-1, size-inset-1),
+                                  radius=int(size*.22), fill=(220, 38, 38, 255))
+              # White screen body
+              x0, y0, x1, y1 = int(size*.22), int(size*.29), int(size*.78), int(size*.70)
+              d.rounded_rectangle((x0, y0, x1, y1), radius=int(size*.07), fill='white')
+              # Red play triangle
+              d.polygon([(int(size*.43), int(size*.37)),
+                         (int(size*.43), int(size*.62)),
+                         (int(size*.63), int(size*.495))], fill=(239, 68, 68, 255))
+              # Small camera tabs at the top suggest a video clapper/screen.
+              d.rounded_rectangle((int(size*.29), int(size*.22), int(size*.71), int(size*.31)),
+                                  radius=max(1, int(size*.025)), fill='white')
+              image.save(root / f'mipmap-{density}' / 'ic_launcher.png')
+          drawable = root / 'drawable'
+          drawable.mkdir(parents=True, exist_ok=True)
+          (drawable / 'ic_launcher_foreground.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#FFFFFFFF" android:pathData="M24,31 Q24,25 30,25 L78,25 Q84,25 84,31 L84,77 Q84,83 78,83 L30,83 Q24,83 24,77 Z"/>
+              <path android:fillColor="#FFEF4444" android:pathData="M43,39 L43,69 L68,54 Z"/>
+              <path android:fillColor="#FFFFFFFF" android:pathData="M31,20 L77,20 L77,29 L31,29 Z"/>
+          </vector>
+          ''')
+          (root / 'values').mkdir(parents=True, exist_ok=True)
+          colors = root / 'values' / 'ic_launcher_background.xml'
+          colors.write_text('''<?xml version="1.0" encoding="utf-8"?>
+          <resources><color name="ic_launcher_background">#EF4444</color></resources>
+          ''')
+          adaptive = root / 'mipmap-anydpi-v26'
+          adaptive.mkdir(parents=True, exist_ok=True)
+          (adaptive / 'ic_launcher.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_launcher_background"/>
+              <foreground android:drawable="@drawable/ic_launcher_foreground"/>
+          </adaptive-icon>
+          ''')
+          (adaptive / 'ic_launcher_round.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_launcher_background"/>
+              <foreground android:drawable="@drawable/ic_launcher_foreground"/>
+          </adaptive-icon>
+          ''')
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          if 'android:icon=' not in text:
+              text = text.replace('<application', '<application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"', 1)
+          else:
+              import re
+              text = re.sub(r'android:icon="[^"]+"', 'android:icon="@mipmap/ic_launcher"', text, count=1)
+              if 'android:roundIcon=' not in text:
+                  text = text.replace('android:icon="@mipmap/ic_launcher"', 'android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round"', 1)
+              else:
+                  text = re.sub(r'android:roundIcon="[^"]+"', 'android:roundIcon="@mipmap/ic_launcher_round"', text, count=1)
+          manifest.write_text(text)
+          print('Generated red SN Player video launcher icons for legacy and adaptive Android launchers.')
+          PY
       - name: Set Android package name and release signing from GitHub Secrets
         shell: bash
         env:
