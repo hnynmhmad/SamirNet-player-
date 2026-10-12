@@ -58,6 +58,9 @@ jobs:
               'android.permission.READ_MEDIA_IMAGES',
               'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
               'android.permission.READ_EXTERNAL_STORAGE',
+              'android.permission.FOREGROUND_SERVICE',
+              'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
+              'android.permission.WAKE_LOCK',
           ]
           for permission in permissions:
               if permission in text:
@@ -70,6 +73,23 @@ jobs:
                   raise SystemExit('AndroidManifest.xml has no application element')
               text = text.replace('<application', element + '\n    <application', 1)
           text = text.replace('android:label="samirnet_player"', 'android:label="SN Player"')
+          service = '''        <service
+                      android:name="com.ryanheise.audioservice.AudioService"
+                      android:foregroundServiceType="mediaPlayback"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.media.browse.MediaBrowserService" />
+                      </intent-filter>
+                  </service>
+                  <receiver
+                      android:name="com.ryanheise.audioservice.MediaButtonReceiver"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MEDIA_BUTTON" />
+                      </intent-filter>
+                  </receiver>'''
+          if 'com.ryanheise.audioservice.AudioService' not in text:
+              text = text.replace('</application>', service + '\\n    </application>', 1)
           path.write_text(text)
           import xml.etree.ElementTree as ET
           ET.parse(path)
