@@ -406,7 +406,7 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
       body: items.isEmpty ? const Center(child: Text('لا توجد فيديوهات')) : grid
         ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: items.length, gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 240, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: .78), itemBuilder: (_,i) {
             final e=items[i]; final picked=selected.contains(e.id);
-            return Card(clipBehavior: Clip.antiAlias, child: InkWell(onTap: () { if (selecting) _toggleSelect(e); else widget.onPlay(e); }, onLongPress: () => _toggleSelect(e), child: Column(children: [
+            return Card(clipBehavior: Clip.antiAlias, child: InkWell(onTap: () { if (selecting) { _toggleSelect(e); } else { widget.onPlay(e); } }, onLongPress: () => _toggleSelect(e), child: Column(children: [
               Expanded(child: Stack(fit: StackFit.expand, children: [
                 FutureBuilder<Uint8List?>(future: e.asset.thumbnailDataWithSize(const ThumbnailSize(480,320)), builder: (_,s) => s.data == null ? const ColoredBox(color: Colors.black12, child: Icon(Icons.movie, size: 40)) : Image.memory(s.data!, fit: BoxFit.cover)),
                 if (selecting) Positioned(top: 4,right:4,child: Icon(picked ? Icons.check_circle : Icons.radio_button_unchecked,color: picked ? coral : Colors.white,size:28)),
@@ -417,7 +417,7 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
           })
         : ListView.builder(padding: const EdgeInsets.all(12), itemCount: items.length, itemBuilder: (_,i) {
             final e=items[i]; final picked=selected.contains(e.id);
-            return Card(child: ListTile(onLongPress: () => _toggleSelect(e), onTap: () { if (selecting) _toggleSelect(e); else widget.onPlay(e); }, leading: SizedBox(width:80,height:60,child: FutureBuilder<Uint8List?>(future:e.asset.thumbnailDataWithSize(const ThumbnailSize(160,120)),builder:(_,s)=>s.data==null?const Icon(Icons.movie):Image.memory(s.data!,fit:BoxFit.cover))),title: Text(e.name,maxLines:2,overflow:TextOverflow.ellipsis),subtitle: Text(_formatDuration(e.duration)),trailing: selecting ? Icon(picked?Icons.check_circle:Icons.radio_button_unchecked,color:coral) : const Icon(Icons.play_arrow)));
+            return Card(child: ListTile(onLongPress: () => _toggleSelect(e), onTap: () { if (selecting) { _toggleSelect(e); } else { widget.onPlay(e); } }, leading: SizedBox(width:80,height:60,child: FutureBuilder<Uint8List?>(future:e.asset.thumbnailDataWithSize(const ThumbnailSize(160,120)),builder:(_,s)=>s.data==null?const Icon(Icons.movie):Image.memory(s.data!,fit:BoxFit.cover))),title: Text(e.name,maxLines:2,overflow:TextOverflow.ellipsis),subtitle: Text(_formatDuration(e.duration)),trailing: selecting ? Icon(picked?Icons.check_circle:Icons.radio_button_unchecked,color:coral) : const Icon(Icons.play_arrow)));
           }),
     ));
   }
