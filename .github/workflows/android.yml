@@ -200,12 +200,66 @@ jobs:
           if len(package_lines) != 1:
               raise SystemExit(f'Expected one package declaration in {activity}')
           lines[package_lines[0]] = 'package ' + expected
-          activity.write_text('\n'.join(lines) + '\n')
+          source = '\n'.join(lines) + '\n'
+          if activity.suffix == '.kt':
+              for imp in [
+                  'import android.app.PictureInPictureParams',
+                  'import android.os.Build',
+                  'import android.util.Rational',
+                  'import io.flutter.embedding.engine.FlutterEngine',
+                  'import io.flutter.plugin.common.MethodChannel',
+              ]:
+                  if imp not in source:
+                      source = source.replace('import io.flutter.embedding.android.FlutterActivity', 'import io.flutter.embedding.android.FlutterActivity\n' + imp, 1)
+              declaration = 'class MainActivity : FlutterActivity()'
+              implementation = '''class MainActivity : FlutterActivity() {
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.samirnet.snplayer/pip")
+                      .setMethodCallHandler { call, result ->
+                          if (call.method != "enterPip") {
+                              result.notImplemented()
+                          } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                              result.success(false)
+                          } else {
+                              try {
+                                  val params = PictureInPictureParams.Builder()
+                                      .setAspectRatio(Rational(16, 9))
+                                      .build()
+                                  result.success(enterPictureInPictureMode(params))
+                              } catch (error: Exception) {
+                                  result.error("PIP_FAILED", error.message, null)
+                              }
+                          }
+                      }
+              }
+          }'''
+              if declaration not in source and 'setMethodCallHandler' not in source:
+                  raise SystemExit('Unexpected Kotlin MainActivity template; cannot safely add PiP channel')
+              if declaration in source:
+                  source = source.replace(declaration, implementation, 1)
+          else:
+              raise SystemExit('Expected generated Kotlin MainActivity to configure Picture-in-Picture safely')
+          activity.write_text(source)
 
-          manifest = Path('android/app/src/main/AndroidManifest.xml').read_text()
+          manifest_path = Path('android/app/src/main/AndroidManifest.xml')
+          manifest = manifest_path.read_text()
           if 'android:name=".MainActivity"' not in manifest and 'android:name="com.samirnet.snplayer.MainActivity"' not in manifest:
               raise SystemExit('Android manifest does not declare the expected MainActivity')
-          print(f'Verified MainActivity package: {expected} ({activity})')
+          import re
+          pattern = r'(<activity\\b(?=[^>]*android:name="(?:\\.MainActivity|com\\.samirnet\\.snplayer\\.MainActivity)")[^>]*)(>)'
+          def add_pip(match):
+              tag = match.group(1)
+              if 'android:supportsPictureInPicture=' not in tag:
+                  tag += ' android:supportsPictureInPicture="true"'
+              if 'android:configChanges=' not in tag:
+                  tag += ' android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"'
+              return tag + match.group(2)
+          manifest, count = re.subn(pattern, add_pip, manifest, count=1, flags=re.DOTALL)
+          if count != 1 or 'android:supportsPictureInPicture="true"' not in manifest:
+              raise SystemExit('Could not enable Picture-in-Picture on MainActivity')
+          manifest_path.write_text(manifest)
+          print(f'Verified MainActivity package and Picture-in-Picture support: {expected} ({activity})')
           PY
       - name: Set Android app compile SDK to 36
         shell: bash
@@ -237,6 +291,7 @@ jobs:
           text = path.read_text()
           permissions = [
               'android.permission.READ_MEDIA_VIDEO',
+              'android.permission.READ_MEDIA_AUDIO',
               'android.permission.READ_MEDIA_IMAGES',
               'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
               'android.permission.READ_EXTERNAL_STORAGE',
