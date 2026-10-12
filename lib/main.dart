@@ -271,7 +271,7 @@ class FolderVideosScreen extends StatelessWidget {
   Widget build(BuildContext context) => Directionality(
     textDirection: TextDirection.rtl,
     child: Scaffold(
-      appBar: AppBar(title: Text(title), subtitle: null),
+      appBar: AppBar(title: Text(title)),
       body: entries.isEmpty
         ? const Center(child: Text('لا توجد فيديوهات في هذا المجلد'))
         : ListView.separated(
