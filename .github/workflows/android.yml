@@ -203,7 +203,7 @@ jobs:
               ]:
                   if imp not in source:
                       source = source.replace('import io.flutter.embedding.android.FlutterActivity', 'import io.flutter.embedding.android.FlutterActivity\n' + imp, 1)
-              declaration = 'class MainActivity : AudioServiceActivity()'
+              declaration = 'class MainActivity : FlutterActivity()'
               implementation = '''class MainActivity : AudioServiceActivity() {
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
