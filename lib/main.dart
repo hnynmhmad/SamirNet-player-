@@ -8,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:audio_service/audio_service.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'services/vault_service.dart';
@@ -16,9 +18,84 @@ import 'services/wifi_transfer_service.dart';
 const coral = Color(0xFFEF4444);
 const ink = Color(0xFF111827);
 
+late final AudioHandler backgroundAudioHandler;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  backgroundAudioHandler = await AudioService.init(
+    builder: () => SNBackgroundAudioHandler(),
+    config: const AudioServiceConfig(
+      androidNotificationChannelId: 'com.samirnet.player.audio',
+      androidNotificationChannelName: 'SN Player playback',
+      androidNotificationOngoing: true,
+      androidStopForegroundOnPause: true,
+    ),
+  );
   runApp(const SamirNetApp());
+}
+
+class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
+  final AudioPlayer _player = AudioPlayer();
+  SNBackgroundAudioHandler() {
+    _player.playbackEventStream.listen((event) {
+      final playing = _player.playing;
+      playbackState.add(playbackState.value.copyWith(
+        controls: [
+          MediaControl.skipToPrevious,
+          playing ? MediaControl.pause : MediaControl.play,
+          MediaControl.stop,
+          MediaControl.skipToNext,
+        ],
+        systemActions: const {MediaAction.seek},
+        androidCompactActionIndices: const [0, 1, 2],
+        processingState: const {
+          ProcessingState.idle: AudioProcessingState.idle,
+          ProcessingState.loading: AudioProcessingState.loading,
+          ProcessingState.buffering: AudioProcessingState.buffering,
+          ProcessingState.ready: AudioProcessingState.ready,
+          ProcessingState.completed: AudioProcessingState.completed,
+        }[_player.processingState]!,
+        playing: playing,
+        updatePosition: _player.position,
+        bufferedPosition: _player.bufferedPosition,
+        speed: _player.speed,
+        queueIndex: event.currentIndex,
+      ));
+    });
+    _player.currentIndexStream.listen((index) {
+      if (index != null && index < queue.value.length) mediaItem.add(queue.value[index]);
+    });
+  }
+  Future<void> playFileInBackground(File file, String title) async {
+    final item = MediaItem(id: file.path, title: title, artist: 'SN Player');
+    mediaItem.add(item);
+    queue.add([item]);
+    await _player.setFilePath(file.path);
+    await _player.play();
+  }
+  @override
+  Future<void> play() => _player.play();
+  @override
+  Future<void> pause() => _player.pause();
+  @override
+  Future<void> stop() async {
+    await _player.stop();
+    await super.stop();
+  }
+  @override
+  Future<void> seek(Duration position) => _player.seek(position);
+  @override
+  Future<void> setSpeed(double speed) => _player.setSpeed(speed);
+  @override
+  Future<dynamic> customAction(String name, [Map<String, dynamic>? extras]) async {
+    if (name == 'playFileInBackground') {
+      final path = extras?['path'] as String?;
+      final title = extras?['title'] as String? ?? 'SN Player';
+      if (path == null || path.isEmpty) throw ArgumentError('Missing media file path');
+      await playFileInBackground(File(path), title);
+    }
+    return null;
+  }
 }
 
 class SamirNetApp extends StatefulWidget {
@@ -532,6 +609,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final level = (_startLevel + (start.dy - d.localPosition.dy) / MediaQuery.sizeOf(context).height * 2).clamp(0.0, 1.0);
     if (_brightnessGesture) { ScreenBrightness().setScreenBrightness(level); }
     else { VolumeController().setVolume(level); }
+  }
+  Future<void> _startBackgroundAudio() async {
+    try {
+      await backgroundAudioHandler.customAction('playFileInBackground', {'path': widget.file.path, 'title': widget.entry.name});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يستمر الصوت في الخلفية مع إشعار التحكم. يمكنك الخروج من التطبيق.')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الصوت في الخلفية: $e')));
+    }
   }
   Future<void> _toggleFullscreen() async {
     final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
