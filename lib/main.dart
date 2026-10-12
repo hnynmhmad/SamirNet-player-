@@ -213,7 +213,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Widget _folders() {
     final groups = <String, List<MediaEntry>>{};
     for (final v in videos) {
-      final raw = (v.asset.relativePath ?? '').replaceAll('\\\\', '/').replaceAll(RegExp(r'/+
+      final raw = (v.asset.relativePath ?? '').replaceAll('\\\\', '/').replaceAll(RegExp(r'/+$'), '');
+      final parts = raw.split('/').where((part) => part.trim().isNotEmpty).toList();
+      final name = parts.isEmpty ? 'المجلد الرئيسي' : parts.last;
+      groups.putIfAbsent(name, () => []).add(v);
+    }
+    return ListView(padding: const EdgeInsets.all(16), children: [
+      const Text('المجلدات', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 12),
+      if (groups.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Text('لا توجد مجلدات فيديو متاحة')),
+      ...groups.entries.map((e) => Card(child: ListTile(
+        leading: const CircleAvatar(backgroundColor: Color(0x22EF4444), child: Icon(Icons.folder_rounded, color: coral)),
+        title: Text(e.key, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text('${e.value.length} فيديو'),
+        trailing: const Icon(Icons.chevron_left),
+        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: e.key, entries: e.value, onPlay: (v) => _play(v), isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite))),
+      ))),
+    ]);
+  }
   Widget _settings() => ListView(padding: const EdgeInsets.all(16), children: [
     const Text('الإعدادات', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
     const SizedBox(height: 12),
@@ -243,7 +260,9 @@ class PlayerScreen extends StatefulWidget {
 }
 class _PlayerScreenState extends State<PlayerScreen> {
   late final VideoPlayerController controller;
-  bool ready = false, controls = true, locked = false, fillScreen = false;
+  bool ready = false, controls = true, locked = false, fillScreen = false, _longPressActive = false;
+  double _speedBeforeLongPress = 1.0;
+  Duration _seekStartPosition = Duration.zero;
   String? subtitleText;
   Duration subtitleOffset = Duration.zero;
   double? subtitleSize;
@@ -345,15 +364,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
     await SystemChrome.setPreferredOrientations(landscape ? [DeviceOrientation.portraitUp] : [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
     if (mounted) setState(() {});
   }
-  void _horizontalSeekStart(DragStartDetails d) { _gestureStart = d.localPosition; }
+  void _horizontalSeekStart(DragStartDetails d) {
+    _gestureStart = d.localPosition;
+    _seekStartPosition = controller.value.position;
+    _showControls();
+  }
   void _horizontalSeekUpdate(DragUpdateDetails d) {
     final start = _gestureStart;
-    if (start == null) return;
+    if (start == null || controller.value.duration <= Duration.zero) return;
     final delta = d.localPosition.dx - start.dx;
-    final seconds = (delta / MediaQuery.sizeOf(context).width * controller.value.duration.inSeconds).round();
-    final targetMs = (controller.value.position.inMilliseconds + seconds * 1000).clamp(0, controller.value.duration.inMilliseconds);
+    final seconds = (delta / MediaQuery.sizeOf(context).width * 120).round();
+    final targetMs = (_seekStartPosition.inMilliseconds + seconds * 1000).clamp(0, controller.value.duration.inMilliseconds);
     controller.seekTo(Duration(milliseconds: targetMs));
-    _gestureStart = d.localPosition;
+    _showControls();
+  }
+  Future<void> _beginSpeedBoost(LongPressStartDetails details) async {
+    if (locked || !ready || _longPressActive) return;
+    _longPressActive = true;
+    _speedBeforeLongPress = controller.value.playbackSpeed;
+    await controller.setPlaybackSpeed(2.0);
+    _showControls();
+  }
+  Future<void> _endSpeedBoost() async {
+    if (!_longPressActive) return;
+    _longPressActive = false;
+    await controller.setPlaybackSpeed(1.0);
     _showControls();
   }
   @override
@@ -370,7 +405,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final v = controller.value;
-    return Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTap: () {}, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, onHorizontalDragStart: locked ? null : _horizontalSeekStart, onHorizontalDragUpdate: locked ? null : _horizontalSeekUpdate, onHorizontalDragEnd: (_) => _gestureStart = null, onVerticalDragStart: locked ? null : _gestureStartAt, onVerticalDragUpdate: locked ? null : _gestureUpdate, onVerticalDragEnd: (_) => _gestureStart = null, child: Stack(alignment: Alignment.center, children: [
+    return Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTap: () {}, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, onLongPressStart: locked ? null : _beginSpeedBoost, onLongPressEnd: locked ? null : (_) => _endSpeedBoost(), onHorizontalDragStart: locked ? null : _horizontalSeekStart, onHorizontalDragUpdate: locked ? null : _horizontalSeekUpdate, onHorizontalDragEnd: (_) => _gestureStart = null, onVerticalDragStart: locked ? null : _gestureStartAt, onVerticalDragUpdate: locked ? null : _gestureUpdate, onVerticalDragEnd: (_) => _gestureStart = null, child: Stack(alignment: Alignment.center, children: [
       if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: VideoPlayer(controller)))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: VideoPlayer(controller))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
       if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),
       if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
