@@ -890,45 +890,6 @@ class _WifiTransferScreenState extends State<WifiTransferScreen> {
     ]),
   );
 }
-),'');
-    if(base.isEmpty||token.text.trim().isEmpty){setState(()=>status='أدخل عنوان الاستقبال والرمز أولًا.');return;}
-    setState(()=>sending=true);
-    var sent=0;
-    try {
-      for(final entry in widget.entries){
-        final file=await entry.asset.file;
-        if(file==null)continue;
-        final client=HttpClient();
-        try{
-          final uri=Uri.parse('$base/upload?name=${Uri.encodeComponent(entry.name)}');
-          final request=await client.postUrl(uri);
-          request.headers.set(HttpHeaders.authorizationHeader,'Bearer ${token.text.trim()}');
-          request.headers.contentType=ContentType.binary;
-          request.contentLength=await file.length();
-          await request.addStream(file.openRead());
-          final response=await request.close();
-          final body=await utf8.decoder.bind(response).join();
-          if(response.statusCode<200||response.statusCode>=300)throw HttpException('فشل إرسال ${entry.name}: $body');
-          sent++;
-        } finally {client.close(force:true);}
-      }
-      if(mounted)setState(()=>status='اكتمل الإرسال: $sent من ${widget.entries.length} ملف.');
-    } catch(e){if(mounted)setState(()=>status='توقف الإرسال بعد $sent ملف. السبب: $e');}
-    finally {if(mounted)setState(()=>sending=false);}
-  }
-  @override
-  Widget build(BuildContext context)=>Directionality(textDirection:TextDirection.rtl,child:Scaffold(appBar:AppBar(title:const Text('إرسال عبر SN Player')),body:ListView(padding:const EdgeInsets.all(16),children:[
-    Text('الملفات المحددة: ${widget.entries.length}',style:const TextStyle(fontWeight:FontWeight.bold,fontSize:18)),
-    const SizedBox(height:14),
-    TextField(controller:url,keyboardType:TextInputType.url,decoration:const InputDecoration(labelText:'عنوان جهاز الاستقبال',hintText:'http://192.168.1.10:12345')),
-    const SizedBox(height:10),
-    TextField(controller:token,decoration:const InputDecoration(labelText:'رمز المصادقة')),
-    const SizedBox(height:14),
-    FilledButton.icon(onPressed:sending?null:_send,icon:const Icon(Icons.send),label:Text(sending?'جارٍ الإرسال...':'إرسال الملفات')),
-    const SizedBox(height:12),Text(status),
-    const SizedBox(height:10),const Text('على الجهاز المستقبِل افتح نقل الملفات عبر Wi-Fi وابدأ الاستقبال، ثم انسخ العنوان والرمز إلى هنا. يجب أن يكون الجهازان على الشبكة نفسها.'),
-  ])));
-}
 
 class FolderVideosScreen extends StatefulWidget {
   const FolderVideosScreen({required this.title, required this.entries, required this.onPlay, required this.isFavorite, required this.onFavorite, super.key});
