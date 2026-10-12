@@ -25,7 +25,7 @@ jobs:
           cache: true
       - name: Generate Android platform files
         run: flutter create --platforms=android --org com.samirnet .
-      - name: Create SN Player launcher icon
+      - name: Create SM Player launcher icon
         shell: bash
         run: |
           python3 -m pip install --quiet pillow
@@ -96,7 +96,7 @@ jobs:
               else:
                   text = re.sub(r'android:roundIcon="[^"]+"', 'android:roundIcon="@mipmap/ic_launcher_round"', text, count=1)
           manifest.write_text(text)
-          print('Generated red SN Player video launcher icons for legacy and adaptive Android launchers.')
+          print('Generated red SM Player video launcher icons for legacy and adaptive Android launchers.')
           PY
       - name: Set Android package name and release signing from GitHub Secrets
         shell: bash
