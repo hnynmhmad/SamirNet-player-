@@ -43,26 +43,17 @@ jobs:
               inset = int(size * .08)
               d.rounded_rectangle((inset, inset, size-inset-1, size-inset-1),
                                   radius=int(size*.22), fill=(220, 38, 38, 255))
-              # White video-camera/screen glyph on the red background.
-              x0, y0, x1, y1 = int(size*.20), int(size*.29), int(size*.68), int(size*.71)
-              d.rounded_rectangle((x0, y0, x1, y1), radius=int(size*.07), fill='white')
-              d.polygon([(int(size*.68), int(size*.39)),
-                         (int(size*.84), int(size*.30)),
-                         (int(size*.84), int(size*.70)),
-                         (int(size*.68), int(size*.61))], fill='white')
-              # Red play cutout makes the white video symbol recognizable at small sizes.
-              d.polygon([(int(size*.37), int(size*.39)),
-                         (int(size*.37), int(size*.61)),
-                         (int(size*.54), int(size*.50))], fill=(220, 38, 38, 255))
+              # A clear white play triangle on a solid red background.
+              d.polygon([(int(size*.36), int(size*.23)),
+                         (int(size*.36), int(size*.77)),
+                         (int(size*.78), int(size*.50))], fill='white')
               image.save(root / f'mipmap-{density}' / 'ic_launcher.png')
           drawable = root / 'drawable'
           drawable.mkdir(parents=True, exist_ok=True)
           (drawable / 'ic_launcher_foreground.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M24,31 Q24,25 30,25 L78,25 Q84,25 84,31 L84,77 Q84,83 78,83 L30,83 Q24,83 24,77 Z"/>
-              <path android:fillColor="#FFEF4444" android:pathData="M43,39 L43,69 L68,54 Z"/>
-              <path android:fillColor="#FFFFFFFF" android:pathData="M31,20 L77,20 L77,29 L31,29 Z"/>
+              <path android:fillColor="#FFFFFFFF" android:pathData="M34,22 L34,86 L82,54 Z"/>
           </vector>
           ''')
           (root / 'values').mkdir(parents=True, exist_ok=True)
