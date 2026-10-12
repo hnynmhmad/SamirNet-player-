@@ -75,11 +75,14 @@ jobs:
               else:
                   print(listing.stdout)
               if gradle.suffix == '.kts':
-                  if 'import java.util.Properties' not in text:
-                      text = 'import java.util.Properties' + chr(10) + 'import java.io.FileInputStream' + chr(10) + text
-                  load = 'val keystoreProperties = Properties()' + chr(10) + 'val keystorePropertiesFile = rootProject.file("key.properties")' + chr(10) + 'if (keystorePropertiesFile.exists()) {' + chr(10) + '    keystoreProperties.load(FileInputStream(keystorePropertiesFile))' + chr(10) + '}' + chr(10) + chr(10)
-                  if 'val keystoreProperties = Properties()' not in text:
-                      text = load + text
+                  # Kotlin DSL requires the plugins block before ordinary statements.
+                  # Use fully-qualified Java classes and insert keystore loading after plugins.
+                  load = 'val keystoreProperties = java.util.Properties()' + chr(10) + 'val keystorePropertiesFile = rootProject.file("key.properties")' + chr(10) + 'if (!keystorePropertiesFile.exists()) error("Release signing key.properties is missing")' + chr(10) + 'keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))' + chr(10) + chr(10)
+                  if 'val keystoreProperties = java.util.Properties()' not in text:
+                      match = re.search(r'(?s)plugins\s*\{.*?\}', text)
+                      if not match:
+                          raise SystemExit('Could not find plugins block in Kotlin Gradle file')
+                      text = text[:match.end()] + chr(10) + chr(10) + load + text[match.end():]
                   signing = '    signingConfigs {' + chr(10) + '        create("snRelease") {' + chr(10) + '            keyAlias = keystoreProperties["keyAlias"] as String' + chr(10) + '            keyPassword = keystoreProperties["keyPassword"] as String' + chr(10) + '            storeFile = file(keystoreProperties["storeFile"] as String)' + chr(10) + '            storePassword = keystoreProperties["storePassword"] as String' + chr(10) + '        }' + chr(10) + '    }' + chr(10)
                   if 'create("snRelease")' not in text:
                       text = text.replace('android {', 'android {' + chr(10) + signing, 1)
