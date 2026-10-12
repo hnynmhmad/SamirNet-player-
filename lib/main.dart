@@ -72,6 +72,10 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     _player.currentIndexStream.listen((index) {
       if (index != null && index < queue.value.length) mediaItem.add(queue.value[index]);
     });
+    _player.durationStream.listen((duration) {
+      final current = mediaItem.value;
+      if (duration != null && current != null) mediaItem.add(current.copyWith(duration: duration));
+    });
   }
   Future<void> playFileInBackground(File file, String title) async {
     await playQueueInBackground([file], [title], 0);
@@ -82,7 +86,7 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     }
     final items = List<MediaItem>.generate(files.length, (i) =>
       MediaItem(id: files[i].path, title: titles[i], artist: 'SM Player'));
-    final start = initialIndex.clamp(0, files.length - 1);
+    final start = initialIndex.clamp(0, files.length - 1).toInt();
     queue.add(items);
     mediaItem.add(items[start]);
     await _player.setAudioSource(
@@ -821,7 +825,7 @@ class _MusicPlayerScreenState extends State<MusicPlayerScreen> {
           Text(item?.artist ?? 'SM Player · Music Library', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white60, fontSize: 13)),
           const SizedBox(height: 22),
           SliderTheme(data: SliderTheme.of(context).copyWith(activeTrackColor: coral, thumbColor: Colors.white, inactiveTrackColor: Colors.white24), child: Slider(
-            value: position.inMilliseconds.clamp(0, maxMs.toInt()).toDouble().clamp(0, maxMs),
+            value: position.inMilliseconds.clamp(0, maxMs.toInt()).toDouble().clamp(0, maxMs).toDouble(),
             max: maxMs,
             onChangeStart: (v) => setState(() => _dragPosition = v),
             onChanged: (v) => setState(() => _dragPosition = v),
