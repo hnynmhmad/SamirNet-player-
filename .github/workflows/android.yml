@@ -206,13 +206,14 @@ jobs:
                   'import android.app.PictureInPictureParams',
                   'import android.os.Build',
                   'import android.util.Rational',
+                  'import com.ryanheise.audioservice.AudioServiceActivity',
                   'import io.flutter.embedding.engine.FlutterEngine',
                   'import io.flutter.plugin.common.MethodChannel',
               ]:
                   if imp not in source:
                       source = source.replace('import io.flutter.embedding.android.FlutterActivity', 'import io.flutter.embedding.android.FlutterActivity\n' + imp, 1)
-              declaration = 'class MainActivity : FlutterActivity()'
-              implementation = '''class MainActivity : FlutterActivity() {
+              declaration = 'class MainActivity : AudioServiceActivity()'
+              implementation = '''class MainActivity : AudioServiceActivity() {
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.samirnet.snplayer/pip")
