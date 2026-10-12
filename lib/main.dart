@@ -154,7 +154,8 @@ List<MediaEntry> _sortEntries(Iterable<MediaEntry> source, String sort) {
       case 'durationAsc': return a.duration.compareTo(b.duration);
       case 'durationDesc': return b.duration.compareTo(a.duration);
       case 'dateAsc': return a.asset.createDateTime.compareTo(b.asset.createDateTime);
-      case 'dateDesc': default: return b.asset.createDateTime.compareTo(a.asset.createDateTime);
+      case 'dateDesc':
+      default: return b.asset.createDateTime.compareTo(a.asset.createDateTime);
     }
   });
   return result;
@@ -589,23 +590,45 @@ class FolderVideosScreen extends StatefulWidget {
 }
 class _FolderVideosScreenState extends State<FolderVideosScreen> {
   bool grid = true;
+  String sort = 'dateDesc';
+  @override
+  void initState() { super.initState(); _loadViewPrefs(); }
+  Future<void> _loadViewPrefs() async {
+    final p = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() { sort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('video_grid') ?? true; });
+  }
+  Future<void> _saveViewPrefs() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString('video_sort', sort);
+    await p.setBool('video_grid', grid);
+  }
+  List<MediaEntry> get sortedEntries => _sortEntries(widget.entries, sort);
   @override
   Widget build(BuildContext context) => Directionality(
     textDirection: TextDirection.rtl,
     child: Scaffold(
       appBar: AppBar(title: Text(widget.title), actions: [
-        IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () => setState(() => grid = !grid), icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
+        IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () { setState(() => grid = !grid); _saveViewPrefs(); }, icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
+        PopupMenuButton<String>(tooltip: 'ترتيب الفيديوهات', icon: const Icon(Icons.sort), onSelected: (v) { setState(() => sort = v); _saveViewPrefs(); }, itemBuilder: (_) => const [
+          PopupMenuItem(value: 'dateDesc', child: Text('الأحدث أولًا')),
+          PopupMenuItem(value: 'dateAsc', child: Text('الأقدم أولًا')),
+          PopupMenuItem(value: 'nameAsc', child: Text('الاسم: أ إلى ي')),
+          PopupMenuItem(value: 'nameDesc', child: Text('الاسم: ي إلى أ')),
+          PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')),
+          PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا')),
+        ]),
       ]),
-      body: widget.entries.isEmpty ? const Center(child: Text('لا توجد فيديوهات في هذا المجلد')) : grid
-        ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: widget.entries.length, gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 240, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: .8), itemBuilder: (context, index) {
-            final entry = widget.entries[index];
+      body: sortedEntries.isEmpty ? const Center(child: Text('لا توجد فيديوهات في هذا المجلد')) : grid
+        ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: sortedEntries.length, gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 240, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: .8), itemBuilder: (context, index) {
+            final entry = sortedEntries[index];
             return Card(child: InkWell(onTap: () => widget.onPlay(entry), child: Column(children: [
               Expanded(child: FutureBuilder<Uint8List?>(future: entry.asset.thumbnailDataWithSize(const ThumbnailSize(480,320)), builder: (_, s) => s.data == null ? const Icon(Icons.movie_outlined) : Image.memory(s.data!, fit: BoxFit.cover, width: double.infinity))),
               Padding(padding: const EdgeInsets.all(8), child: Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis)),
               IconButton(onPressed: () => widget.onFavorite(entry), icon: Icon(widget.isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: coral)),
             ])));
           })
-        : ListView.builder(padding: const EdgeInsets.all(12), itemCount: widget.entries.length, itemBuilder: (context, index) {
+        : ListView.builder(padding: const EdgeInsets.all(12), itemCount: sortedEntries.length, itemBuilder: (context, index) {
             final entry = widget.entries[index];
             return Card(child: ListTile(title: Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis), subtitle: Text(_formatDuration(entry.duration)), trailing: IconButton(onPressed: () => widget.onFavorite(entry), icon: Icon(widget.isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: coral)), onTap: () => widget.onPlay(entry)));
           }),
