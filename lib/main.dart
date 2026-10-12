@@ -167,11 +167,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
         const SizedBox(height: 16),
         TextField(controller: search, onChanged: (v) => setState(() => query = v), decoration: InputDecoration(hintText: 'ابحث عن فيديو...', prefixIcon: const Icon(Icons.search), filled: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none))),
         const SizedBox(height: 12),
-        Row(children: [
-          _chip('الكل', 0), const SizedBox(width: 8), _chip('قصيرة', 1), const SizedBox(width: 8), _chip('طويلة', 2), const Spacer(),
-          IconButton.filledTonal(onPressed: () => setState(() => grid = !grid), icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
-        ]),
-        const SizedBox(height: 10),
+        if (tab != 0 || showAllVideos) ...[
+          Row(children: [
+            _chip('الكل', 0), const SizedBox(width: 8), _chip('قصيرة', 1), const SizedBox(width: 8), _chip('طويلة', 2), const Spacer(),
+            IconButton.filledTonal(onPressed: () => setState(() => grid = !grid), icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
+          ]),
+          const SizedBox(height: 10),
+        ],
         if (tab == 0) ...[
           const SizedBox(height: 4),
           Row(children: [
