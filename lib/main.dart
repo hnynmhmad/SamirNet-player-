@@ -175,9 +175,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (tab == 0) ...[
           const SizedBox(height: 4),
           Row(children: [
-            Expanded(child: _homeShortcut(Icons.video_library_rounded, 'كل الفيديوهات', coral, () => setState(() { tab = 0; showAllVideos = true; filter = 0; query = ''; search.clear(); }))),
+            Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () => setState(() { tab = 0; showAllVideos = true; filter = 0; query = ''; search.clear(); }))),
             const SizedBox(width: 10),
-            Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () => _toast('مكتبة الصوتيات المستقلة قيد الإضافة، ويمكن تشغيل الصوت داخل مشغل الملفات حاليًا.'))),
+            Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () => _toast('قسم الصوتيات المستقل لم يكتمل بعد.'))),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: _homeShortcut(Icons.folder_rounded, 'المجلدات', const Color(0xFFFF9800), () => setState(() => tab = 1))),
+            const SizedBox(width: 10),
+            Expanded(child: _homeShortcut(Icons.favorite_rounded, 'المفضلة', const Color(0xFFE84C8A), () => setState(() => tab = 2))),
           ]),
           const SizedBox(height: 16),
           Text(showAllVideos ? 'كل الفيديوهات' : 'متابعة المشاهدة', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
@@ -252,6 +258,48 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String _format(Duration d) { final h = d.inHours; final m = d.inMinutes.remainder(60).toString().padLeft(2, '0'); final s = d.inSeconds.remainder(60).toString().padLeft(2, '0'); return h > 0 ? '$h:$m:$s' : '$m:$s'; }
 }
 
+
+class FolderVideosScreen extends StatelessWidget {
+  const FolderVideosScreen({required this.title, required this.entries, required this.onPlay, required this.isFavorite, required this.onFavorite, super.key});
+  final String title;
+  final List<MediaEntry> entries;
+  final ValueChanged<MediaEntry> onPlay;
+  final bool Function(MediaEntry) isFavorite;
+  final ValueChanged<MediaEntry> onFavorite;
+
+  @override
+  Widget build(BuildContext context) => Directionality(
+    textDirection: TextDirection.rtl,
+    child: Scaffold(
+      appBar: AppBar(title: Text(title), subtitle: null),
+      body: entries.isEmpty
+        ? const Center(child: Text('لا توجد فيديوهات في هذا المجلد'))
+        : ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: entries.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final entry = entries[index];
+              return Card(child: ListTile(
+                leading: const CircleAvatar(backgroundColor: Color(0x22EF4444), child: Icon(Icons.movie_outlined, color: coral)),
+                title: Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+                subtitle: Text(_formatDuration(entry.duration)),
+                trailing: IconButton(onPressed: () => onFavorite(entry), icon: Icon(isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: coral)),
+                onTap: () => onPlay(entry),
+              ));
+            },
+          ),
+    ),
+  );
+}
+
+String _formatDuration(Duration d) {
+  final h = d.inHours;
+  final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+  return h > 0 ? '$h:$m:$s' : '$m:$s';
+}
+
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({required this.entry, required this.file, required this.favorite, required this.onFavorite, super.key});
   final MediaEntry entry; final File file; final bool favorite; final VoidCallback onFavorite;
@@ -261,7 +309,6 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> {
   late final VideoPlayerController controller;
   bool ready = false, controls = true, locked = false, fillScreen = false, _longPressActive = false;
-  double _speedBeforeLongPress = 1.0;
   Duration _seekStartPosition = Duration.zero;
   String? subtitleText;
   Duration subtitleOffset = Duration.zero;
@@ -381,7 +428,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _beginSpeedBoost(LongPressStartDetails details) async {
     if (locked || !ready || _longPressActive) return;
     _longPressActive = true;
-    _speedBeforeLongPress = controller.value.playbackSpeed;
     await controller.setPlaybackSpeed(2.0);
     _showControls();
   }
