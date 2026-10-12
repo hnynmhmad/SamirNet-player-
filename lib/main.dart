@@ -149,7 +149,8 @@ List<MediaEntry> _sortEntries(Iterable<MediaEntry> source, String sort) {
   final result = source.toList();
   result.sort((a, b) {
     switch (sort) {
-      case 'nameAsc': return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      case 'nameAsc':
+      case 'nameAZ': return a.name.toLowerCase().compareTo(b.name.toLowerCase());
       case 'nameDesc': return b.name.toLowerCase().compareTo(a.name.toLowerCase());
       case 'durationAsc': return a.duration.compareTo(b.duration);
       case 'durationDesc': return b.duration.compareTo(a.duration);
@@ -259,6 +260,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ]),
     ]), actions: [
       IconButton(tooltip: 'تحديث المكتبة', onPressed: _scan, icon: const Icon(Icons.refresh_rounded)),
+      PopupMenuButton<String>(tooltip: 'ترتيب الفيديوهات', icon: const Icon(Icons.sort_rounded), onSelected: (v) async { setState(() => videoSort = v); await _saveViewPreferences(); }, itemBuilder: (_) => const [
+        PopupMenuItem(value: 'dateDesc', child: Text('الأحدث أولًا')),
+        PopupMenuItem(value: 'dateAsc', child: Text('الأقدم أولًا')),
+        PopupMenuItem(value: 'nameAsc', child: Text('الاسم: أ إلى ي')),
+        PopupMenuItem(value: 'nameDesc', child: Text('الاسم: ي إلى أ')),
+        PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')),
+        PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا')),
+      ]),
       IconButton(tooltip: 'نقل عبر Wi-Fi', onPressed: () => _toast('ميزة نقل Wi-Fi ضمن مرحلة التطوير التالية'), icon: const Icon(Icons.wifi_rounded)),
     ]),
     body: tab == 4 ? _settings() : tab == 1 ? _folders() : _library(),
@@ -462,7 +471,7 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
           final files = items.where((v) => selected.contains(v.id)).toList();
           Navigator.push(context, MaterialPageRoute(builder: (_) => InternalSendScreen(entries: files)));
         }, icon: const Icon(Icons.send_rounded)),
-        IconButton(tooltip: 'تغيير العرض', onPressed: () => setState(() => grid = !grid), icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
+        IconButton(tooltip: 'تغيير العرض', onPressed: () { setState(() => grid = !grid); _saveViewPrefs(); }, icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
         PopupMenuButton<String>(tooltip: 'ترتيب الفيديوهات', icon: const Icon(Icons.sort), onSelected: (v) { setState(() => sort = v); _saveViewPrefs(); }, itemBuilder: (_) => const [
           PopupMenuItem(value: 'nameAsc', child: Text('الاسم: أ إلى ي')),
           PopupMenuItem(value: 'nameDesc', child: Text('الاسم: ي إلى أ')),
@@ -656,7 +665,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool ready = false, controls = true, locked = false, fillScreen = false, _longPressActive = false;
   bool _isFavorite = false, _repeat = false, _shuffle = false;
   int _playlistIndex = 0;
-  bool _completionHandled = false;
   Duration _seekStartPosition = Duration.zero;
   String? subtitleText;
   Duration subtitleOffset = Duration.zero;
