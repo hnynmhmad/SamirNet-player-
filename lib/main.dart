@@ -350,7 +350,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (start == null) return;
     final delta = d.localPosition.dx - start.dx;
     final seconds = (delta / MediaQuery.sizeOf(context).width * controller.value.duration.inSeconds).round();
-    controller.seekTo((controller.value.position + Duration(seconds: seconds)).clamp(Duration.zero, controller.value.duration));
+    final targetMs = (controller.value.position.inMilliseconds + seconds * 1000).clamp(0, controller.value.duration.inMilliseconds);
+    controller.seekTo(Duration(milliseconds: targetMs));
     _gestureStart = d.localPosition;
     _showControls();
   }
