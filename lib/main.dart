@@ -449,50 +449,57 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
   Widget build(BuildContext context)=>Directionality(textDirection:TextDirection.rtl,child:Scaffold(appBar:AppBar(title:const Text('الصوتيات')),body:loading?const Center(child:CircularProgressIndicator()):error!=null?Center(child:Padding(padding:const EdgeInsets.all(20),child:Text(error!))):audio.isEmpty?const Center(child:Text('لم يتم العثور على ملفات صوتية')):ListView.builder(itemCount:audio.length,itemBuilder:(context,i){final e=audio[i];return ListTile(leading:const CircleAvatar(backgroundColor:Color(0x223979D5),child:Icon(Icons.music_note,color:Color(0xFF3979D5))),title:Text(e.name,maxLines:2,overflow:TextOverflow.ellipsis),subtitle:Text(_formatDuration(e.duration)),trailing:const Icon(Icons.play_arrow),onTap:()=>widget.onPlay(e));})));
 }
 
-class InternalSendScreen extends StatefulWidget {
-  const InternalSendScreen({required this.entries,super.key});
+class InternalSendScreen extends StatelessWidget {
+  const InternalSendScreen({required this.entries, super.key});
   final List<MediaEntry> entries;
   @override
-  State<InternalSendScreen> createState()=>_InternalSendScreenState();
+  Widget build(BuildContext context) => Directionality(
+    textDirection: TextDirection.rtl,
+    child: Scaffold(
+      appBar: AppBar(title: const Text('إرسال عبر SN Player')),
+      body: ListView(padding: const EdgeInsets.all(16), children: [
+        Text('الملفات المحددة: ${entries.length}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        const Text('ميزة الإرسال الداخلي تحتاج إلى ربطها بخادم الاستقبال قبل استخدامها. يمكنك استخدام زر المشاركة الخارجية مؤقتًا.'),
+        const SizedBox(height: 12),
+        ...entries.map((e) => ListTile(leading: const Icon(Icons.video_file), title: Text(e.name))),
+      ]),
+    ),
+  );
 }
-class _InternalSendScreenState extends State<InternalSendScreen>{
-  final url=TextEditingController();
-  final token=TextEditingController();
-  bool sending=false;
-  String status='أدخل عنوان جهاز الاستقبال ورمز المصادقة الظاهرين في SN Player على الجهاز الآخر.';
-  @override
-  void dispose(){url.dispose();token.dispose();super.dispose();}
-  Future<void> _send() async {
-    final base=url.text.trim().replaceAll(RegExp(r'/+
+
+class FolderVideosScreen extends StatefulWidget {
   const FolderVideosScreen({required this.title, required this.entries, required this.onPlay, required this.isFavorite, required this.onFavorite, super.key});
   final String title;
   final List<MediaEntry> entries;
   final ValueChanged<MediaEntry> onPlay;
   final bool Function(MediaEntry) isFavorite;
   final ValueChanged<MediaEntry> onFavorite;
-
+  @override
+  State<FolderVideosScreen> createState() => _FolderVideosScreenState();
+}
+class _FolderVideosScreenState extends State<FolderVideosScreen> {
+  bool grid = true;
   @override
   Widget build(BuildContext context) => Directionality(
     textDirection: TextDirection.rtl,
     child: Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: entries.isEmpty
-        ? const Center(child: Text('لا توجد فيديوهات في هذا المجلد'))
-        : ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: entries.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (context, index) {
-              final entry = entries[index];
-              return Card(child: ListTile(
-                leading: const CircleAvatar(backgroundColor: Color(0x22EF4444), child: Icon(Icons.movie_outlined, color: coral)),
-                title: Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-                subtitle: Text(_formatDuration(entry.duration)),
-                trailing: IconButton(onPressed: () => onFavorite(entry), icon: Icon(isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: coral)),
-                onTap: () => onPlay(entry),
-              ));
-            },
-          ),
+      appBar: AppBar(title: Text(widget.title), actions: [
+        IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () => setState(() => grid = !grid), icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
+      ]),
+      body: widget.entries.isEmpty ? const Center(child: Text('لا توجد فيديوهات في هذا المجلد')) : grid
+        ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: widget.entries.length, gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 240, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: .8), itemBuilder: (context, index) {
+            final entry = widget.entries[index];
+            return Card(child: InkWell(onTap: () => widget.onPlay(entry), child: Column(children: [
+              Expanded(child: FutureBuilder<Uint8List?>(future: entry.asset.thumbnailDataWithSize(const ThumbnailSize(480,320)), builder: (_, s) => s.data == null ? const Icon(Icons.movie_outlined) : Image.memory(s.data!, fit: BoxFit.cover, width: double.infinity))),
+              Padding(padding: const EdgeInsets.all(8), child: Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis)),
+              IconButton(onPressed: () => widget.onFavorite(entry), icon: Icon(widget.isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: coral)),
+            ])));
+          })
+        : ListView.builder(padding: const EdgeInsets.all(12), itemCount: widget.entries.length, itemBuilder: (context, index) {
+            final entry = widget.entries[index];
+            return Card(child: ListTile(title: Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis), subtitle: Text(_formatDuration(entry.duration)), trailing: IconButton(onPressed: () => widget.onFavorite(entry), icon: Icon(widget.isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: coral)), onTap: () => widget.onPlay(entry)));
+          }),
     ),
   );
 }
