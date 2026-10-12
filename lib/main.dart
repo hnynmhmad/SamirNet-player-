@@ -71,7 +71,7 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   int tab = 0, filter = 0;
-  bool loading = true, denied = false, grid = true;
+  bool loading = true, denied = false, grid = true, showAllVideos = false;
   String? scanError;
   String query = '';
   final search = TextEditingController();
@@ -113,6 +113,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
   List<MediaEntry> get shown {
     Iterable<MediaEntry> list = videos;
+    if (tab == 0 && !showAllVideos) list = history.map((id) => videos.where((v) => v.id == id).firstOrNull).whereType<MediaEntry>();
     if (tab == 2) list = list.where((v) => favorites.contains(v.id));
     if (tab == 3) list = history.map((id) => videos.where((v) => v.id == id).firstOrNull).whereType<MediaEntry>();
     if (filter == 1) list = list.where((v) => v.duration.inMinutes < 10);
@@ -149,7 +150,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       IconButton(tooltip: 'نقل عبر Wi-Fi', onPressed: () => _toast('ميزة نقل Wi-Fi ضمن مرحلة التطوير التالية'), icon: const Icon(Icons.wifi_rounded)),
     ]),
     body: tab == 4 ? _settings() : tab == 1 ? _folders() : _library(),
-    bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (v) => setState(() => tab = v), destinations: const [
+    bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (v) => setState(() { tab = v; if (v != 0) showAllVideos = false; }), destinations: const [
       NavigationDestination(icon: Icon(Icons.video_library_outlined), selectedIcon: Icon(Icons.video_library), label: 'الرئيسية'),
       NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder), label: 'المجلدات'),
       NavigationDestination(icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: 'المفضلة'),
@@ -174,12 +175,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (tab == 0) ...[
           const SizedBox(height: 4),
           Row(children: [
-            Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () => setState(() { tab = 0; filter = 0; query = ''; search.clear(); }))),
+            Expanded(child: _homeShortcut(Icons.video_library_rounded, 'كل الفيديوهات', coral, () => setState(() { tab = 0; showAllVideos = true; filter = 0; query = ''; search.clear(); }))),
             const SizedBox(width: 10),
             Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () => _toast('مكتبة الصوتيات المستقلة قيد الإضافة، ويمكن تشغيل الصوت داخل مشغل الملفات حاليًا.'))),
           ]),
           const SizedBox(height: 16),
-          const Text('متابعة المشاهدة', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          Text(showAllVideos ? 'كل الفيديوهات' : 'متابعة المشاهدة', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
         ] else if (tab == 2) const Text('المفضلة', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold))
         else if (tab == 3) const Text('سجل المشاهدة', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
       ]))),
