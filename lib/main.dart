@@ -844,33 +844,48 @@ class _WifiTransferScreenState extends State<WifiTransferScreen> {
   ])));
 }
 
-class FolderVideosScreen extends StatelessWidget {
+class FolderVideosScreen extends StatefulWidget {
   const FolderVideosScreen({required this.title, required this.entries, required this.onPlay, required this.isFavorite, required this.onFavorite, super.key});
   final String title;
   final List<MediaEntry> entries;
   final ValueChanged<MediaEntry> onPlay;
   final bool Function(MediaEntry) isFavorite;
   final ValueChanged<MediaEntry> onFavorite;
-
+  @override
+  State<FolderVideosScreen> createState() => _FolderVideosScreenState();
+}
+class _FolderVideosScreenState extends State<FolderVideosScreen> {
+  bool grid = true;
   @override
   Widget build(BuildContext context) => Directionality(
     textDirection: TextDirection.rtl,
     child: Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: entries.isEmpty
+      appBar: AppBar(title: Text(widget.title), actions: [
+        IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () => setState(() => grid = !grid), icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
+      ]),
+      body: widget.entries.isEmpty
         ? const Center(child: Text('لا توجد فيديوهات في هذا المجلد'))
-        : ListView.separated(
+        : grid
+          ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: widget.entries.length, gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 240, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: .8), itemBuilder: (context,index) {
+              final entry=widget.entries[index];
+              return Card(clipBehavior: Clip.antiAlias, child: InkWell(onTap:()=>widget.onPlay(entry), child: Column(children:[
+                Expanded(child: FutureBuilder<Uint8List?>(future:entry.asset.thumbnailDataWithSize(const ThumbnailSize(480,320)),builder:(_,s)=>s.data==null?const Center(child:Icon(Icons.movie_outlined,size:38)):Image.memory(s.data!,fit:BoxFit.cover,width:double.infinity))),
+                Padding(padding:const EdgeInsets.all(8),child:Text(entry.name,maxLines:2,overflow:TextOverflow.ellipsis)),
+                IconButton(onPressed:()=>widget.onFavorite(entry),icon:Icon(widget.isFavorite(entry)?Icons.favorite:Icons.favorite_border,color:coral)),
+              ])));
+            })
+          : ListView.separated(
             padding: const EdgeInsets.all(16),
-            itemCount: entries.length,
+            itemCount: widget.entries.length,
             separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
-              final entry = entries[index];
+              final entry = widget.entries[index];
               return Card(child: ListTile(
-                leading: const CircleAvatar(backgroundColor: Color(0x22EF4444), child: Icon(Icons.movie_outlined, color: coral)),
+                leading: SizedBox(width:76,height:56,child:FutureBuilder<Uint8List?>(future:entry.asset.thumbnailDataWithSize(const ThumbnailSize(160,120)),builder:(_,s)=>s.data==null?const Icon(Icons.movie_outlined):Image.memory(s.data!,fit:BoxFit.cover))),
                 title: Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis),
                 subtitle: Text(_formatDuration(entry.duration)),
-                trailing: IconButton(onPressed: () => onFavorite(entry), icon: Icon(isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: coral)),
-                onTap: () => onPlay(entry),
+                trailing: IconButton(onPressed: () => widget.onFavorite(entry), icon: Icon(widget.isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: coral)),
+                onTap: () => widget.onPlay(entry),
               ));
             },
           ),
