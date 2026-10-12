@@ -390,12 +390,20 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
   }
   Future<void> _shareExternal() async {
     final files = <XFile>[];
-    for (final entry in sorted.where((v) => selected.contains(v.id))) {
-      final file = await entry.asset.file;
-      if (file != null) files.add(XFile(file.path, name: entry.name));
+    try {
+      for (final entry in sorted.where((v) => selected.contains(v.id))) {
+        final file = await entry.asset.file;
+        if (file != null) files.add(XFile(file.path, name: entry.name));
+      }
+      if (files.isEmpty) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذر الوصول إلى الملفات المحددة')));
+        return;
+      }
+      await Share.shareXFiles(files, text: 'مشاركة من SM Player');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تم فتح المشاركة لـ ${files.length} ملف')));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذرت مشاركة الملفات: $e')));
     }
-    if (files.isEmpty) return;
-    await Share.shareXFiles(files, text: 'مشاركة من SM Player');
   }
   void _toggleSelect(MediaEntry e) => setState(() {
     if (!selected.add(e.id)) selected.remove(e.id);
