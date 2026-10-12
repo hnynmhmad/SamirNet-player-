@@ -75,7 +75,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String? scanError;
   String query = '';
   final search = TextEditingController();
-  final ScrollController _homeScroll = ScrollController();
   List<MediaEntry> videos = [];
   Set<String> favorites = {};
   List<String> history = [];
