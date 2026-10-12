@@ -7,6 +7,7 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'services/vault_service.dart';
@@ -78,6 +79,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   List<MediaEntry> videos = [];
   Set<String> favorites = {};
   List<String> history = [];
+  bool foldersGrid = false;
+  String videoSort = 'nameAsc';
   @override
   void initState() { super.initState(); _loadLocal(); _scan(); }
   @override
@@ -176,9 +179,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (tab == 0) ...[
           const SizedBox(height: 4),
           Row(children: [
-            Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () => setState(() { tab = 0; showAllVideos = true; filter = 0; query = ''; search.clear(); }))),
+            Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () => Navigator.push(context, MaterialPageRoute(builder: (_) => VideosLibraryScreen(entries: videos, initialFavorites: favorites, onPlay: _play, onFavorite: _favorite)))),
             const SizedBox(width: 10),
-            Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () => _toast('قسم الصوتيات المستقل لم يكتمل بعد.'))),
+            Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () => Navigator.push(context, MaterialPageRoute(builder: (_) => AudioLibraryScreen(onPlay: _play))))),
           ]),
           const SizedBox(height: 10),
           Row(children: [
@@ -225,17 +228,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
       final name = parts.isEmpty ? 'المجلد الرئيسي' : parts.last;
       groups.putIfAbsent(name, () => []).add(v);
     }
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      const Text('المجلدات', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-      const SizedBox(height: 12),
-      if (groups.isEmpty) const Padding(padding: EdgeInsets.all(24), child: Text('لا توجد مجلدات فيديو متاحة')),
-      ...groups.entries.map((e) => Card(child: ListTile(
-        leading: const CircleAvatar(backgroundColor: Color(0x22EF4444), child: Icon(Icons.folder_rounded, color: coral)),
-        title: Text(e.key, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text('${e.value.length} فيديو'),
-        trailing: const Icon(Icons.chevron_left),
-        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: e.key, entries: e.value, onPlay: (v) => _play(v), isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite))),
-      ))),
+    final entries = groups.entries.toList();
+    return Column(children: [
+      Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 8), child: Row(children: [
+        const Expanded(child: Text('المجلدات', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800))),
+        IconButton(tooltip: foldersGrid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () => setState(() => foldersGrid = !foldersGrid), icon: Icon(foldersGrid ? Icons.view_list : Icons.grid_view)),
+      ])),
+      Expanded(child: entries.isEmpty ? const Center(child: Text('لا توجد مجلدات فيديو متاحة')) : foldersGrid
+        ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.35, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (context, i) {
+            final e = entries[i];
+            return Card(child: InkWell(borderRadius: BorderRadius.circular(12), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: e.key, entries: e.value, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite))), child: Padding(padding: const EdgeInsets.all(12), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [const Icon(Icons.folder_rounded, color: coral, size: 34), const SizedBox(height: 8), Text(e.key, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)), Text('${e.value.length} فيديو', style: const TextStyle(color: Colors.grey))]))));
+          })
+        : ListView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, itemBuilder: (context, i) {
+            final e = entries[i];
+            return Card(child: ListTile(leading: const Icon(Icons.folder_rounded, color: coral), title: Text(e.key, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text('${e.value.length} فيديو'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: e.key, entries: e.value, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)))));
+          })),
     ]);
   }
   Widget _settings() => ListView(padding: const EdgeInsets.all(16), children: [
