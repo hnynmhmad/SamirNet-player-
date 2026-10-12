@@ -52,7 +52,7 @@ jobs:
               raise SystemExit('Could not set Android namespace/applicationId')
 
           env = {k: os.environ.get(k, '').strip() for k in ('SN_KEYSTORE_BASE64','SN_KEYSTORE_PASSWORD','SN_KEY_ALIAS','SN_KEY_PASSWORD')}
-          if env['SN_KEYSTORE_BASE64'] and env['SN_KEYSTORE_PASSWORD'] and env['SN_KEY_PASSWORD']:
+          if all(env.values()):
               keystore = Path('android/app/sameer-player-release.jks')
               keystore.write_bytes(base64.b64decode(env['SN_KEYSTORE_BASE64'], validate=True))
               alias = env['SN_KEY_ALIAS']
@@ -65,7 +65,7 @@ jobs:
                       raise SystemExit('Set SN_KEY_ALIAS manually; no single private-key alias could be detected.')
                   alias = match.group(1).strip()
               props = Path('android/key.properties')
-              props.write_text('storePassword=' + env['SN_KEYSTORE_PASSWORD'] + chr(10) + 'keyPassword=' + env['SN_KEY_PASSWORD'] + chr(10) + 'keyAlias=' + alias + chr(10) + 'storeFile=sameer-player-release.jks' + chr(10))
+              props.write_text('storePassword=' + env['SN_KEYSTORE_PASSWORD'] + chr(10) + 'keyPassword=' + env['SN_KEY_PASSWORD'] + chr(10) + 'keyAlias=' + alias + chr(10) + 'storeFile=app/sameer-player-release.jks' + chr(10))
               listing = subprocess.run(['keytool','-list','-v','-keystore',str(keystore),'-storepass',env['SN_KEYSTORE_PASSWORD'],'-alias',alias], text=True, capture_output=True)
               if listing.returncode:
                   raise SystemExit('Could not inspect signing certificate; verify the keystore password and alias.')
@@ -98,7 +98,7 @@ jobs:
                       text = re.sub(r'(release\s*\{)', r'\1' + chr(10) + '            signingConfig signingConfigs.snRelease', text, count=1)
               print('Release signing configured using the provided keystore.')
           else:
-              print('Signing secrets incomplete; APK will not use the uploaded release key until secrets are set.')
+              raise SystemExit('Missing signing secrets. Set SN_KEYSTORE_BASE64, SN_KEYSTORE_PASSWORD, SN_KEY_ALIAS, and SN_KEY_PASSWORD before building a release APK.')
           gradle.write_text(text)
           print('Android applicationId and namespace set to ' + package)
           PY
