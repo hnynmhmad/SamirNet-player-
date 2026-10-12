@@ -89,7 +89,7 @@ jobs:
                       </intent-filter>
                   </receiver>'''
           if 'com.ryanheise.audioservice.AudioService' not in text:
-              text = text.replace('</application>', service + '\\n    </application>', 1)
+              text = text.replace('</application>', service + '\n    </application>', 1)
           path.write_text(text)
           import xml.etree.ElementTree as ET
           ET.parse(path)
