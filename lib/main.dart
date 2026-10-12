@@ -145,6 +145,21 @@ class MediaEntry {
   Duration get duration => Duration(seconds: asset.duration);
 }
 
+List<MediaEntry> _sortEntries(Iterable<MediaEntry> source, String sort) {
+  final result = source.toList();
+  result.sort((a, b) {
+    switch (sort) {
+      case 'nameAsc': return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      case 'nameDesc': return b.name.toLowerCase().compareTo(a.name.toLowerCase());
+      case 'durationAsc': return a.duration.compareTo(b.duration);
+      case 'durationDesc': return b.duration.compareTo(a.duration);
+      case 'dateAsc': return a.asset.createDateTime.compareTo(b.asset.createDateTime);
+      case 'dateDesc': default: return b.asset.createDateTime.compareTo(a.asset.createDateTime);
+    }
+  });
+  return result;
+}
+
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({required this.mode, required this.onMode, super.key});
   final ThemeMode mode;
@@ -172,7 +187,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _loadLocal() async {
     final p = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() { favorites = (p.getStringList('favorites') ?? []).toSet(); history = p.getStringList('history') ?? []; backgroundMode = p.getString('background_mode') ?? 'audio'; });
+    setState(() { favorites = (p.getStringList('favorites') ?? []).toSet(); history = p.getStringList('history') ?? []; backgroundMode = p.getString('background_mode') ?? 'audio'; videoSort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('video_grid') ?? true; foldersGrid = p.getBool('folders_grid') ?? false; });
   }
   Future<void> _openPermissionSettings() async {
     try {
@@ -205,21 +220,31 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (filter == 1) list = list.where((v) => v.duration.inMinutes < 10);
     if (filter == 2) list = list.where((v) => v.duration.inMinutes >= 10);
     if (query.trim().isNotEmpty) list = list.where((v) => v.name.toLowerCase().contains(query.trim().toLowerCase()));
-    return list.toList();
+    return _sortEntries(list, videoSort);
   }
   Future<void> _favorite(MediaEntry v) async {
     setState(() { if (!favorites.add(v.id)) favorites.remove(v.id); });
     final p = await SharedPreferences.getInstance(); await p.setStringList('favorites', favorites.toList());
   }
   Future<void> _play(MediaEntry v) async {
-    final file = await v.asset.file;
-    if (file == null || !mounted) { _toast('تعذّر الوصول إلى الملف'); return; }
     final p = await SharedPreferences.getInstance();
     history.remove(v.id); history.insert(0, v.id); history = history.take(100).toList();
     await p.setStringList('history', history);
     if (!mounted) return;
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => PlayerScreen(entry: v, file: file, favorite: favorites.contains(v.id), onFavorite: () => _favorite(v))));
+    await _openPlayer(v, replace: false);
     if (mounted) setState(() {});
+  }
+  Future<void> _openPlayer(MediaEntry v, {required bool replace}) async {
+    final file = await v.asset.file;
+    if (file == null || !mounted) { _toast('تعذّر الوصول إلى الملف'); return; }
+    final page = MaterialPageRoute(builder: (_) => PlayerScreen(entry: v, file: file, favorite: favorites.contains(v.id), playlist: _sortEntries(videos, videoSort), onFavorite: () => _favorite(v), onNavigate: (next) => _openPlayer(next, replace: true)));
+    if (replace) { await Navigator.pushReplacement(context, page); } else { await Navigator.push(context, page); }
+  }
+  Future<void> _saveViewPreferences() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('video_grid', grid);
+    await p.setBool('folders_grid', foldersGrid);
+    await p.setString('video_sort', videoSort);
   }
   void _toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
   @override
@@ -256,7 +281,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (tab != 0 || showAllVideos) ...[
           Row(children: [
             _chip('الكل', 0), const SizedBox(width: 8), _chip('قصيرة', 1), const SizedBox(width: 8), _chip('طويلة', 2), const Spacer(),
-            IconButton.filledTonal(onPressed: () => setState(() => grid = !grid), icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
+            IconButton.filledTonal(onPressed: () { setState(() => grid = !grid); _saveViewPreferences(); }, icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
           ]),
           const SizedBox(height: 10),
         ],
@@ -316,7 +341,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return Column(children: [
       Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 8), child: Row(children: [
         const Expanded(child: Text('المجلدات', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800))),
-        IconButton(tooltip: foldersGrid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () => setState(() => foldersGrid = !foldersGrid), icon: Icon(foldersGrid ? Icons.view_list : Icons.grid_view)),
+        IconButton(tooltip: foldersGrid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () { setState(() => foldersGrid = !foldersGrid); _saveViewPreferences(); }, icon: Icon(foldersGrid ? Icons.view_list : Icons.grid_view)),
       ])),
       Expanded(child: entries.isEmpty ? const Center(child: Text('لا توجد مجلدات فيديو متاحة')) : foldersGrid
         ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.35, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (context, i) {
@@ -343,7 +368,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       RadioListTile<ThemeMode>(title: const Text('اتباع مظهر النظام'), value: ThemeMode.system, groupValue: widget.mode, onChanged: (v) { if (v != null) widget.onMode(v); }),
       RadioListTile<ThemeMode>(title: const Text('الوضع الفاتح'), value: ThemeMode.light, groupValue: widget.mode, onChanged: (v) { if (v != null) widget.onMode(v); }),
       RadioListTile<ThemeMode>(title: const Text('الوضع الداكن'), value: ThemeMode.dark, groupValue: widget.mode, onChanged: (v) { if (v != null) widget.onMode(v); }),
-      SwitchListTile(value: grid, onChanged: (v) => setState(() => grid = v), title: const Text('عرض الشبكة'), subtitle: const Text('إيقاف الخيار يعرض الملفات في قائمة')),
+      SwitchListTile(value: grid, onChanged: (v) { setState(() => grid = v); _saveViewPreferences(); }, title: const Text('عرض الشبكة'), subtitle: const Text('إيقاف الخيار يعرض الملفات في قائمة')),
       ListTile(leading: const Icon(Icons.refresh), title: const Text('تحديث مكتبة الوسائط'), onTap: _scan),
       ListTile(leading: const Icon(Icons.lock_outline, color: coral), title: const Text('الخزنة الخاصة'), subtitle: const Text('تشفير ملفاتك وحمايتها برقم سري'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VaultScreen()))),
       ListTile(leading: const Icon(Icons.wifi, color: coral), title: const Text('نقل عبر Wi-Fi'), subtitle: const Text('استقبال ملفات من جهاز آخر على الشبكة نفسها'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WifiTransferScreen()))),
@@ -370,23 +395,22 @@ class VideosLibraryScreen extends StatefulWidget {
 }
 class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
   bool grid = true, selecting = false;
-  String sort = 'nameAsc';
+  String sort = 'dateDesc';
+  @override
+  void initState() { super.initState(); _loadViewPrefs(); }
+  Future<void> _loadViewPrefs() async {
+    final p = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() { sort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('video_grid') ?? true; });
+  }
+  Future<void> _saveViewPrefs() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString('video_sort', sort);
+    await p.setBool('video_grid', grid);
+  }
   final Set<String> selected = {};
   List<MediaEntry> get sorted {
-    final result = [...widget.entries];
-    result.sort((a,b) {
-      switch (sort) {
-        case 'nameDesc': return b.name.toLowerCase().compareTo(a.name.toLowerCase());
-        case 'durationDesc': return b.duration.compareTo(a.duration);
-        case 'durationAsc': return a.duration.compareTo(b.duration);
-        case 'dateAsc': return a.asset.createDateTime.compareTo(b.asset.createDateTime);
-        case 'dateDesc': return b.asset.createDateTime.compareTo(a.asset.createDateTime);
-        case 'nameAZ': return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-        case 'nameAsc':
-        default: return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      }
-    });
-    return result;
+    return _sortEntries(widget.entries, sort);
   }
   Future<void> _shareExternal() async {
     final files = <XFile>[];
@@ -438,7 +462,7 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
           Navigator.push(context, MaterialPageRoute(builder: (_) => InternalSendScreen(entries: files)));
         }, icon: const Icon(Icons.send_rounded)),
         IconButton(tooltip: 'تغيير العرض', onPressed: () => setState(() => grid = !grid), icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
-        PopupMenuButton<String>(tooltip: 'ترتيب الفيديوهات', icon: const Icon(Icons.sort), onSelected: (v) => setState(() => sort = v), itemBuilder: (_) => const [
+        PopupMenuButton<String>(tooltip: 'ترتيب الفيديوهات', icon: const Icon(Icons.sort), onSelected: (v) { setState(() => sort = v); _saveViewPrefs(); }, itemBuilder: (_) => const [
           PopupMenuItem(value: 'nameAsc', child: Text('الاسم: أ إلى ي')),
           PopupMenuItem(value: 'nameDesc', child: Text('الاسم: ي إلى أ')),
           PopupMenuItem(value: 'nameAZ', child: Text('الاسم: A إلى Z')),
@@ -597,14 +621,19 @@ String _formatDuration(Duration d) {
 }
 
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({required this.entry, required this.file, required this.favorite, required this.onFavorite, super.key});
+  const PlayerScreen({required this.entry, required this.file, required this.favorite, required this.onFavorite, required this.playlist, required this.onNavigate, super.key});
   final MediaEntry entry; final File file; final bool favorite; final VoidCallback onFavorite;
+  final List<MediaEntry> playlist;
+  final ValueChanged<MediaEntry> onNavigate;
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 class _PlayerScreenState extends State<PlayerScreen> {
   late final VideoPlayerController controller;
   bool ready = false, controls = true, locked = false, fillScreen = false, _longPressActive = false;
+  bool _isFavorite = false, _repeat = false, _shuffle = false;
+  int _playlistIndex = 0;
+  bool _completionHandled = false;
   Duration _seekStartPosition = Duration.zero;
   String? subtitleText;
   Duration subtitleOffset = Duration.zero;
@@ -617,6 +646,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    _isFavorite = widget.favorite;
+    _playlistIndex = widget.playlist.indexWhere((e) => e.id == widget.entry.id);
+    if (_playlistIndex < 0) _playlistIndex = 0;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight, DeviceOrientation.portraitUp]);
     controller = VideoPlayerController.file(widget.file);
@@ -769,6 +801,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.dispose();
   }
   void _seek(int seconds) { final target = controller.value.position + Duration(seconds: seconds); controller.seekTo(target < Duration.zero ? Duration.zero : target); }
+  void _navigatePlaylist(int direction, {bool randomize = false}) {
+    if (widget.playlist.length < 2) return;
+    final int nextIndex;
+    if (randomize || _shuffle) {
+      final choices = List<int>.generate(widget.playlist.length, (i) => i).where((i) => i != _playlistIndex).toList()..shuffle();
+      nextIndex = choices.first;
+    } else {
+      nextIndex = (_playlistIndex + direction + widget.playlist.length) % widget.playlist.length;
+    }
+    widget.onNavigate(widget.playlist[nextIndex]);
+  }
+  Future<void> _toggleRepeat() async {
+    setState(() => _repeat = !_repeat);
+    await controller.setLooping(_repeat);
+  }
+  void _toggleFavorite() {
+    setState(() => _isFavorite = !_isFavorite);
+    widget.onFavorite();
+  }
   String _time(Duration d) { final h = d.inHours; final m = d.inMinutes.remainder(60).toString().padLeft(2, '0'); final s = d.inSeconds.remainder(60).toString().padLeft(2, '0'); return h > 0 ? '$h:$m:$s' : '$m:$s'; }
   @override
   Widget build(BuildContext context) {
@@ -777,7 +828,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: VideoPlayer(controller)))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: VideoPlayer(controller))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
       if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),
       if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
-        Row(children: [IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)), Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))), IconButton(tooltip: 'تشغيل الصوت في الخلفية', onPressed: _startBackgroundAudio, icon: const Icon(Icons.headphones_rounded, color: Colors.white)), IconButton(onPressed: widget.onFavorite, icon: Icon(widget.favorite ? Icons.favorite : Icons.favorite_border, color: coral)), PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
+        Row(children: [IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)), Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))), IconButton(tooltip: 'تشغيل الصوت في الخلفية', onPressed: _startBackgroundAudio, icon: const Icon(Icons.headphones_rounded, color: Colors.white)), IconButton(onPressed: _toggleFavorite, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)), PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
           if (value.startsWith('speed:')) controller.setPlaybackSpeed(double.parse(value.substring(6)));
           if (value == 'fit') setState(() => fillScreen = !fillScreen);
           if (value == 'rotate') _toggleFullscreen();
@@ -796,7 +847,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ...[0.5, .75, 1.0, 1.25, 1.5, 2.0].map((s) => PopupMenuItem(value: 'speed:$s', child: Text('سرعة $s×'))),
         ])]),
         const Spacer(),
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: [IconButton(onPressed: () => _seek(-10), icon: const Icon(Icons.replay_10, color: Colors.white, size: 36)), const SizedBox(width: 24), IconButton(onPressed: () => v.isPlaying ? controller.pause() : controller.play(), icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white, size: 64)), const SizedBox(width: 24), IconButton(onPressed: () => _seek(10), icon: const Icon(Icons.forward_10, color: Colors.white, size: 36))]),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          IconButton(tooltip: 'الفيديو السابق', onPressed: () => _navigatePlaylist(-1), icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 34)),
+          IconButton(onPressed: () => _seek(-10), icon: const Icon(Icons.replay_10, color: Colors.white, size: 32)),
+          IconButton(onPressed: () => v.isPlaying ? controller.pause() : controller.play(), icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white, size: 64)),
+          IconButton(onPressed: () => _seek(10), icon: const Icon(Icons.forward_10, color: Colors.white, size: 32)),
+          IconButton(tooltip: 'الفيديو التالي', onPressed: () => _navigatePlaylist(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 34)),
+        ]),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          IconButton(tooltip: _repeat ? 'إيقاف التكرار' : 'تكرار الفيديو', onPressed: _toggleRepeat, icon: Icon(Icons.repeat_rounded, color: _repeat ? coral : Colors.white)),
+          IconButton(tooltip: _shuffle ? 'إيقاف العشوائي' : 'تشغيل عشوائي', onPressed: () => setState(() => _shuffle = !_shuffle), icon: Icon(Icons.shuffle_rounded, color: _shuffle ? coral : Colors.white)),
+        ]),
         const Spacer(),
         Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: Column(children: [
           VideoProgressIndicator(controller, allowScrubbing: true, colors: const VideoProgressColors(playedColor: coral, bufferedColor: Colors.white38, backgroundColor: Colors.white24)),
