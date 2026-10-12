@@ -35,11 +35,10 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import os, re, base64
+          import os, re, base64, subprocess
 
           package = 'com.samirnet.snplayer'
-          candidates = [Path('android/app/build.gradle.kts'), Path('android/app/build.gradle')]
-          gradle = next((p for p in candidates if p.exists()), None)
+          gradle = next((p for p in [Path('android/app/build.gradle.kts'), Path('android/app/build.gradle')] if p.exists()), None)
           if gradle is None:
               raise SystemExit('Android app Gradle build file was not generated')
           text = gradle.read_text()
@@ -51,72 +50,57 @@ jobs:
               text = re.sub(r"""(?m)^\s*applicationId\s+["'][^"']+["']""", f"        applicationId '{package}'", text)
           if not re.search(r'(?m)^\s*namespace', text) or not re.search(r'(?m)^\s*applicationId', text):
               raise SystemExit('Could not set Android namespace/applicationId')
-          env = {k: os.environ.get(k, '').strip() for k in (
-              'SN_KEYSTORE_BASE64','SN_KEYSTORE_PASSWORD','SN_KEY_ALIAS','SN_KEY_PASSWORD')}
-          if all(env.values()):
+
+          env = {k: os.environ.get(k, '').strip() for k in ('SN_KEYSTORE_BASE64','SN_KEYSTORE_PASSWORD','SN_KEY_ALIAS','SN_KEY_PASSWORD')}
+          if env['SN_KEYSTORE_BASE64'] and env['SN_KEYSTORE_PASSWORD'] and env['SN_KEY_PASSWORD']:
               keystore = Path('android/app/sameer-player-release.jks')
               keystore.write_bytes(base64.b64decode(env['SN_KEYSTORE_BASE64'], validate=True))
+              alias = env['SN_KEY_ALIAS']
+              if not alias:
+                  listing = subprocess.run(['keytool','-list','-keystore',str(keystore),'-storepass',env['SN_KEYSTORE_PASSWORD']], text=True, capture_output=True)
+                  if listing.returncode:
+                      raise SystemExit('Could not read keystore. Check SN_KEYSTORE_PASSWORD.')
+                  match = re.search(r'(?m)^([^,]+), .*PrivateKeyEntry', listing.stdout)
+                  if not match:
+                      raise SystemExit('Set SN_KEY_ALIAS manually; no single private-key alias could be detected.')
+                  alias = match.group(1).strip()
               props = Path('android/key.properties')
-              props.write_text(
-                  'storePassword=' + env['SN_KEYSTORE_PASSWORD'] + '\n' +
-                  'keyPassword=' + env['SN_KEY_PASSWORD'] + '\n' +
-                  'keyAlias=' + env['SN_KEY_ALIAS'] + '\n' +
-                  'storeFile=sameer-player-release.jks\n')
+              props.write_text('storePassword=' + env['SN_KEYSTORE_PASSWORD'] + chr(10) + 'keyPassword=' + env['SN_KEY_PASSWORD'] + chr(10) + 'keyAlias=' + alias + chr(10) + 'storeFile=sameer-player-release.jks' + chr(10))
+              listing = subprocess.run(['keytool','-list','-v','-keystore',str(keystore),'-storepass',env['SN_KEYSTORE_PASSWORD'],'-alias',alias], text=True, capture_output=True)
+              if listing.returncode:
+                  raise SystemExit('Could not inspect signing certificate; verify the keystore password and alias.')
+              sha = re.search(r'(?im)^\s*SHA1:\s*(.+)$', listing.stdout)
+              if sha:
+                  print('Release signing certificate SHA-1: ' + sha.group(1).strip())
+              else:
+                  print(listing.stdout)
               if gradle.suffix == '.kts':
                   if 'import java.util.Properties' not in text:
-                      text = 'import java.util.Properties\nimport java.io.FileInputStream\n' + text
-                  load = '''val keystoreProperties = Properties()
-          val keystorePropertiesFile = rootProject.file("key.properties")
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-          }
-
-          '''
+                      text = 'import java.util.Properties' + chr(10) + 'import java.io.FileInputStream' + chr(10) + text
+                  load = 'val keystoreProperties = Properties()' + chr(10) + 'val keystorePropertiesFile = rootProject.file("key.properties")' + chr(10) + 'if (keystorePropertiesFile.exists()) {' + chr(10) + '    keystoreProperties.load(FileInputStream(keystorePropertiesFile))' + chr(10) + '}' + chr(10) + chr(10)
                   if 'val keystoreProperties = Properties()' not in text:
                       text = load + text
-                  signing = '''    signingConfigs {
-                  create("snRelease") {
-                      keyAlias = keystoreProperties["keyAlias"] as String
-                      keyPassword = keystoreProperties["keyPassword"] as String
-                      storeFile = file(keystoreProperties["storeFile"] as String)
-                      storePassword = keystoreProperties["storePassword"] as String
-                  }
-              }
-          '''
+                  signing = '    signingConfigs {' + chr(10) + '        create("snRelease") {' + chr(10) + '            keyAlias = keystoreProperties["keyAlias"] as String' + chr(10) + '            keyPassword = keystoreProperties["keyPassword"] as String' + chr(10) + '            storeFile = file(keystoreProperties["storeFile"] as String)' + chr(10) + '            storePassword = keystoreProperties["storePassword"] as String' + chr(10) + '        }' + chr(10) + '    }' + chr(10)
                   if 'create("snRelease")' not in text:
-                      text = text.replace('android {', 'android {\n' + signing, 1)
+                      text = text.replace('android {', 'android {' + chr(10) + signing, 1)
                   if 'signingConfig = signingConfigs.getByName("snRelease")' not in text:
-                      text = re.sub(r'(release\s*\{)', r'\1\n            signingConfig = signingConfigs.getByName("snRelease")', text, count=1)
+                      text = re.sub(r'(release\s*\{)', r'\1' + chr(10) + '            signingConfig = signingConfigs.getByName("snRelease")', text, count=1)
               else:
                   if 'import java.util.Properties' not in text:
-                      text = 'import java.util.Properties\nimport java.io.FileInputStream\n' + text
-                  load = '''def keystoreProperties = new Properties()
-          def keystorePropertiesFile = rootProject.file('key.properties')
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-          }
-
-          '''
+                      text = 'import java.util.Properties' + chr(10) + 'import java.io.FileInputStream' + chr(10) + text
+                  load = 'def keystoreProperties = new Properties()' + chr(10) + "def keystorePropertiesFile = rootProject.file('key.properties')" + chr(10) + 'if (keystorePropertiesFile.exists()) {' + chr(10) + '    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))' + chr(10) + '}' + chr(10) + chr(10)
                   if 'def keystoreProperties = new Properties()' not in text:
                       text = load + text
-                  signing = '''    signingConfigs {
-                  snRelease {
-                      keyAlias keystoreProperties['keyAlias']
-                      keyPassword keystoreProperties['keyPassword']
-                      storeFile file(keystoreProperties['storeFile'])
-                      storePassword keystoreProperties['storePassword']
-                  }
-              }
-          '''
+                  signing = "    signingConfigs {" + chr(10) + "        snRelease {" + chr(10) + "            keyAlias keystoreProperties['keyAlias']" + chr(10) + "            keyPassword keystoreProperties['keyPassword']" + chr(10) + "            storeFile file(keystoreProperties['storeFile'])" + chr(10) + "            storePassword keystoreProperties['storePassword']" + chr(10) + "        }" + chr(10) + "    }" + chr(10)
                   if 'snRelease {' not in text:
-                      text = text.replace('android {', 'android {\n' + signing, 1)
+                      text = text.replace('android {', 'android {' + chr(10) + signing, 1)
                   if 'signingConfig signingConfigs.snRelease' not in text:
-                      text = re.sub(r'(release\s*\{)', r'\1\n            signingConfig signingConfigs.snRelease', text, count=1)
-              print('Release signing configured using GitHub Secrets.')
+                      text = re.sub(r'(release\s*\{)', r'\1' + chr(10) + '            signingConfig signingConfigs.snRelease', text, count=1)
+              print('Release signing configured using the provided keystore.')
           else:
-              print('Signing secrets not all set; this run will build without the uploaded release key.')
+              print('Signing secrets incomplete; APK will not use the uploaded release key until secrets are set.')
           gradle.write_text(text)
-          print(f'Android package name set to {package} in {gradle}')
+          print('Android applicationId and namespace set to ' + package)
           PY
       - name: Set Android app compile SDK to 36
         shell: bash
