@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -73,11 +74,31 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     });
   }
   Future<void> playFileInBackground(File file, String title) async {
-    final item = MediaItem(id: file.path, title: title, artist: 'SM Player');
-    mediaItem.add(item);
-    queue.add([item]);
-    await _player.setFilePath(file.path);
+    await playQueueInBackground([file], [title], 0);
+  }
+  Future<void> playQueueInBackground(List<File> files, List<String> titles, int initialIndex) async {
+    if (files.isEmpty || files.length != titles.length) {
+      throw ArgumentError('The music queue is empty or invalid');
+    }
+    final items = List<MediaItem>.generate(files.length, (i) =>
+      MediaItem(id: files[i].path, title: titles[i], artist: 'SM Player'));
+    final start = initialIndex.clamp(0, files.length - 1);
+    queue.add(items);
+    mediaItem.add(items[start]);
+    await _player.setAudioSource(
+      ConcatenatingAudioSource(children: files.map((file) => AudioSource.file(file.path)).toList()),
+      initialIndex: start,
+    );
     await _player.play();
+  }
+  @override
+  Future<void> skipToNext() async {
+    if (_player.hasNext) await _player.seekToNext();
+  }
+  @override
+  Future<void> skipToPrevious() async {
+    if (_player.hasPrevious) await _player.seekToPrevious();
+    else await _player.seek(Duration.zero);
   }
   @override
   Future<void> play() => _player.play();
@@ -99,6 +120,11 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       final title = extras?['title'] as String? ?? 'SM Player';
       if (path == null || path.isEmpty) throw ArgumentError('Missing media file path');
       await playFileInBackground(File(path), title);
+    } else if (name == 'setLoopMode') {
+      final value = extras?['value'] as String? ?? 'off';
+      await _player.setLoopMode(value == 'one' ? LoopMode.one : value == 'all' ? LoopMode.all : LoopMode.off);
+    } else if (name == 'setShuffle') {
+      await _player.setShuffleModeEnabled(extras?['enabled'] == true);
     }
     return null;
   }
@@ -300,7 +326,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           Row(children: [
             Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () { Navigator.push(context, MaterialPageRoute(builder: (_) => VideosLibraryScreen(entries: videos, initialFavorites: favorites, onPlay: _play, onFavorite: _favorite, onDeleted: _scan))); })),
             const SizedBox(width: 10),
-            Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () => Navigator.push(context, MaterialPageRoute(builder: (_) => AudioLibraryScreen(onPlay: _play))))),
+            Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AudioLibraryScreen())))),
           ]),
           const SizedBox(height: 10),
           Row(children: [
@@ -503,17 +529,41 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
 }
 
 class AudioLibraryScreen extends StatefulWidget {
-  const AudioLibraryScreen({required this.onPlay, super.key});
-  final ValueChanged<MediaEntry> onPlay;
+  const AudioLibraryScreen({super.key});
   @override
   State<AudioLibraryScreen> createState() => _AudioLibraryScreenState();
 }
 class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
-  bool loading = true, showAll = false;
-  String? error, selectedFolder;
+  bool loading = true, showAll = false, musicPlaying = false;
+  String? error, selectedFolder, currentTitle;
   List<MediaEntry> audio = [];
+  AudioHandler? _handler;
+  StreamSubscription<MediaItem?>? _itemSub;
+  StreamSubscription<PlaybackState>? _stateSub;
+
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() { super.initState(); _load(); _watchPlayer(); }
+  @override
+  void dispose() { _itemSub?.cancel(); _stateSub?.cancel(); super.dispose(); }
+
+  Future<void> _watchPlayer() async {
+    try {
+      final handler = await _getBackgroundAudioHandler();
+      if (!mounted) return;
+      _handler = handler;
+      currentTitle = handler.mediaItem.value?.title;
+      musicPlaying = handler.playbackState.value.playing;
+      _itemSub = handler.mediaItem.listen((item) {
+        if (mounted) setState(() => currentTitle = item?.title);
+      });
+      _stateSub = handler.playbackState.listen((state) {
+        if (mounted) setState(() => musicPlaying = state.playing);
+      });
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('Music handler initialization deferred: $e');
+    }
+  }
   Future<void> _load() async {
     if (mounted) setState(() { loading = true; error = null; });
     try {
@@ -538,6 +588,56 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
     }
     return result;
   }
+  Future<void> _openMusicPlayer(List<MediaEntry> source, int selected) async {
+    final files = <File>[];
+    final titles = <String>[];
+    var target = 0;
+    for (var i = 0; i < source.length; i++) {
+      final file = await source[i].asset.file;
+      if (file == null) continue;
+      if (i == selected) target = files.length;
+      files.add(file);
+      titles.add(source[i].name);
+    }
+    if (!mounted) return;
+    if (files.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذر الوصول إلى ملفات الموسيقى')));
+      return;
+    }
+    try {
+      final handler = _handler ?? await _getBackgroundAudioHandler();
+      _handler = handler;
+      await (handler as SNBackgroundAudioHandler).playQueueInBackground(files, titles, target);
+      if (!mounted) return;
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => MusicPlayerScreen(files: files, titles: titles, initialIndex: target, handler: handler)));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الموسيقى: $e')));
+    }
+  }
+  Widget _miniPlayer() {
+    final handler = _handler;
+    if (handler == null || currentTitle == null) return const SizedBox.shrink();
+    return SafeArea(top: false, child: Material(
+      color: const Color(0xFF191919),
+      child: InkWell(
+        onTap: () {
+          final items = handler.queue.value;
+          if (items.isEmpty) return;
+          final files = items.map((e) => File(e.id)).toList();
+          final titles = items.map((e) => e.title).toList();
+          final index = handler.playbackState.value.queueIndex ?? 0;
+          Navigator.push(context, MaterialPageRoute(builder: (_) => MusicPlayerScreen(files: files, titles: titles, initialIndex: index, handler: handler)));
+        },
+        child: Padding(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), child: Row(children: [
+          const CircleAvatar(backgroundColor: coral, child: Icon(Icons.music_note, color: Colors.white)),
+          const SizedBox(width: 10),
+          Expanded(child: Text(currentTitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600))),
+          IconButton(color: Colors.white, tooltip: musicPlaying ? 'إيقاف مؤقت' : 'متابعة', onPressed: () => musicPlaying ? handler.pause() : handler.play(), icon: Icon(musicPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded)),
+          IconButton(color: Colors.white, tooltip: 'التالي', onPressed: () => handler.skipToNext(), icon: const Icon(Icons.skip_next_rounded)),
+        ])),
+      ),
+    ));
+  }
   @override
   Widget build(BuildContext context) {
     final groups = folders;
@@ -547,6 +647,7 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
         IconButton(tooltip: 'تحديث الصوتيات', onPressed: _load, icon: const Icon(Icons.refresh)),
         if (selectedFolder != null) IconButton(tooltip: 'رجوع للمجلدات', onPressed: () => setState(() => selectedFolder = null), icon: const Icon(Icons.folder)),
       ]),
+      bottomNavigationBar: _miniPlayer(),
       body: loading ? const Center(child: CircularProgressIndicator())
         : error != null ? Center(child: Padding(padding: const EdgeInsets.all(20), child: Column(mainAxisSize: MainAxisSize.min, children: [Text(error!, textAlign: TextAlign.center), const SizedBox(height: 12), FilledButton.icon(onPressed: _load, icon: const Icon(Icons.refresh), label: const Text('إعادة المحاولة'))])))
         : audio.isEmpty ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.music_off, size: 56, color: coral), const SizedBox(height: 12), const Text('لم يتم العثور على ملفات صوتية'), const SizedBox(height: 8), const Text('تأكد من منح إذن الصوتيات ثم اضغط تحديث.', textAlign: TextAlign.center), const SizedBox(height: 12), FilledButton.icon(onPressed: _load, icon: const Icon(Icons.refresh), label: const Text('تحديث المكتبة'))])))
@@ -561,11 +662,188 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
             if (selectedFolder == null) Align(alignment: Alignment.centerRight, child: TextButton.icon(onPressed: () => setState(() => showAll = false), icon: const Icon(Icons.folder), label: const Text('عرض المجلدات'))),
             Expanded(child: ListView.builder(itemCount: items.length, itemBuilder: (context, i) {
               final e = items[i];
-              return ListTile(leading: const CircleAvatar(child: Icon(Icons.music_note, color: Color(0xFF3979D5))), title: Text(e.name, maxLines: 2, overflow: TextOverflow.ellipsis), subtitle: Text(_formatDuration(e.duration)), trailing: const Icon(Icons.play_arrow), onTap: () => widget.onPlay(e));
+              return ListTile(
+                leading: const CircleAvatar(backgroundColor: Color(0xFF252525), child: Icon(Icons.album_rounded, color: Color(0xFFEF4444))),
+                title: Text(e.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+                subtitle: Text(_formatDuration(e.duration)),
+                trailing: const Icon(Icons.play_circle_fill_rounded, color: coral, size: 30),
+                onTap: () => _openMusicPlayer(items, i),
+              );
             })),
           ]),
     ));
   }
+}
+
+class MusicPlayerScreen extends StatefulWidget {
+  const MusicPlayerScreen({required this.files, required this.titles, required this.initialIndex, required this.handler, super.key});
+  final List<File> files;
+  final List<String> titles;
+  final int initialIndex;
+  final AudioHandler handler;
+  @override
+  State<MusicPlayerScreen> createState() => _MusicPlayerScreenState();
+}
+class _MusicPlayerScreenState extends State<MusicPlayerScreen> {
+  bool _shuffle = false, _repeat = false;
+  double? _dragPosition;
+  StreamSubscription<MediaItem?>? _mediaSub;
+  @override
+  void initState() {
+    super.initState();
+    _mediaSub = widget.handler.mediaItem.listen((_) { if (mounted) setState(() {}); });
+  }
+  @override
+  void dispose() { _mediaSub?.cancel(); super.dispose(); }
+  String _time(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return d.inHours > 0 ? '${d.inHours}:$m:$s' : '$m:$s';
+  }
+  Future<void> _savePlaylist() async {
+    final controller = TextEditingController(text: 'قائمة الموسيقى');
+    final name = await showDialog<String>(context: context, builder: (context) => AlertDialog(
+      title: const Text('حفظ قائمة التشغيل'),
+      content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(labelText: 'اسم القائمة')),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')), FilledButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text('حفظ'))],
+    ));
+    if (name == null || name.isEmpty) { controller.dispose(); return; }
+    final prefs = await SharedPreferences.getInstance();
+    final playlists = <String, dynamic>{};
+    try { playlists.addAll((jsonDecode(prefs.getString('music_playlists_v1') ?? '{}') as Map).cast<String, dynamic>()); } catch (_) {}
+    playlists[name] = widget.files.map((file) => file.path).toList();
+    await prefs.setString('music_playlists_v1', jsonEncode(playlists));
+    controller.dispose();
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تم حفظ القائمة «$name»')));
+  }
+  Future<void> _showSavedPlaylists() async {
+    final prefs = await SharedPreferences.getInstance();
+    Map<String, dynamic> playlists = {};
+    try { playlists = (jsonDecode(prefs.getString('music_playlists_v1') ?? '{}') as Map).cast<String, dynamic>(); } catch (_) {}
+    if (!mounted) return;
+    await showModalBottomSheet<void>(context: context, showDragHandle: true, builder: (context) => SafeArea(child: playlists.isEmpty
+      ? const Padding(padding: EdgeInsets.all(28), child: Center(child: Text('لا توجد قوائم محفوظة بعد')))
+      : ListView(children: [
+          const ListTile(title: Text('قوائم التشغيل المحفوظة', style: TextStyle(fontWeight: FontWeight.bold))),
+          ...playlists.entries.map((entry) => ListTile(
+            leading: const Icon(Icons.queue_music_rounded, color: coral),
+            title: Text(entry.key),
+            subtitle: Text('${(entry.value as List).length} مسار'),
+            trailing: IconButton(tooltip: 'حذف القائمة', icon: const Icon(Icons.delete_outline), onPressed: () async {
+              final current = <String, dynamic>{...playlists}..remove(entry.key);
+              await prefs.setString('music_playlists_v1', jsonEncode(current));
+              if (context.mounted) Navigator.pop(context);
+              if (mounted) _showSavedPlaylists();
+            }),
+            onTap: () async {
+              final paths = (entry.value as List).whereType<String>().toList();
+              final files = paths.map(File.new).where((f) => f.existsSync()).toList();
+              if (files.isEmpty) { Navigator.pop(context); return; }
+              final titles = files.map((f) => f.uri.pathSegments.isEmpty ? f.path : f.uri.pathSegments.last).toList();
+              final handler = widget.handler;
+              await (handler as SNBackgroundAudioHandler).playQueueInBackground(files, titles, 0);
+              if (context.mounted) Navigator.pop(context);
+              if (mounted) setState(() {});
+            },
+          )),
+        ])));
+  }
+  Future<void> _showQueue() async {
+    final handler = widget.handler;
+    final items = handler.queue.value;
+    if (!mounted) return;
+    await showModalBottomSheet<void>(context: context, isScrollControlled: true, showDragHandle: true, builder: (context) => SafeArea(child: SizedBox(height: MediaQuery.sizeOf(context).height * .65, child: Column(children: [
+      const Padding(padding: EdgeInsets.all(16), child: Text('قائمة الانتظار', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold))),
+      Expanded(child: ReorderableListView.builder(
+        itemCount: items.length,
+        onReorder: (oldIndex, newIndex) async {
+          if (newIndex > oldIndex) newIndex--;
+          final reordered = [...items];
+          final item = reordered.removeAt(oldIndex);
+          reordered.insert(newIndex, item);
+          final files = reordered.map((e) => File(e.id)).toList();
+          final titles = reordered.map((e) => e.title).toList();
+          final currentPath = handler.mediaItem.value?.id;
+          final newCurrent = reordered.indexWhere((e) => e.id == currentPath).clamp(0, reordered.length - 1);
+          await (handler as SNBackgroundAudioHandler).playQueueInBackground(files, titles, newCurrent);
+          if (context.mounted) Navigator.pop(context);
+          if (mounted) setState(() {});
+        },
+        itemBuilder: (context, i) => ListTile(
+          key: ValueKey(items[i].id), leading: Icon(i == (handler.playbackState.value.queueIndex ?? 0) ? Icons.equalizer_rounded : Icons.music_note),
+          title: Text(items[i].title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: Text(items[i].artist ?? 'SM Player'),
+        ),
+      )),
+    ]))));
+  }
+  @override
+  Widget build(BuildContext context) => Directionality(textDirection: TextDirection.rtl, child: Scaffold(
+    backgroundColor: const Color(0xFF090909),
+    appBar: AppBar(
+      backgroundColor: const Color(0xFF090909), foregroundColor: Colors.white,
+      title: const Text('SM PLAYER · MUSIC', style: TextStyle(fontSize: 14, letterSpacing: 1.3, fontWeight: FontWeight.w800)),
+      actions: [
+        IconButton(tooltip: 'قائمة الانتظار', onPressed: _showQueue, icon: const Icon(Icons.queue_music_rounded)),
+        IconButton(tooltip: 'قوائم التشغيل المحفوظة', onPressed: _showSavedPlaylists, icon: const Icon(Icons.library_music_rounded)),
+        IconButton(tooltip: 'حفظ قائمة التشغيل', onPressed: _savePlaylist, icon: const Icon(Icons.playlist_add_rounded)),
+      ],
+    ),
+    body: StreamBuilder<PlaybackState>(
+      stream: widget.handler.playbackState,
+      builder: (context, snapshot) {
+        final state = snapshot.data ?? widget.handler.playbackState.value;
+        final item = widget.handler.mediaItem.value;
+        final duration = item?.duration ?? Duration.zero;
+        final position = _dragPosition == null ? state.position : Duration(milliseconds: _dragPosition!.round());
+        final maxMs = duration.inMilliseconds > 0 ? duration.inMilliseconds.toDouble() : 1.0;
+        return SafeArea(child: ListView(padding: const EdgeInsets.fromLTRB(22, 14, 22, 24), children: [
+          const Center(child: Text('NOW PLAYING', style: TextStyle(color: Color(0xFFEF4444), letterSpacing: 3, fontWeight: FontWeight.w700))),
+          const SizedBox(height: 26),
+          Center(child: SizedBox(width: 270, height: 270, child: Stack(alignment: Alignment.center, children: [
+            AnimatedRotation(
+              turns: state.playing ? 1 : 0,
+              duration: const Duration(seconds: 16),
+              curve: Curves.linear,
+              child: Container(
+                width: 260, height: 260,
+                decoration: BoxDecoration(shape: BoxShape.circle, gradient: const RadialGradient(colors: [Color(0xFFF5F5F5), Color(0xFF8A8A8A), Color(0xFFDADADA), Color(0xFF454545), Color(0xFFBEBEBE), Color(0xFF242424)], stops: [0, .18, .34, .49, .68, 1]), boxShadow: [BoxShadow(color: coral.withOpacity(.32), blurRadius: 28, spreadRadius: 2)]),
+                child: Stack(alignment: Alignment.center, children: [
+                  for (int i = 0; i < 8; i++) Container(width: 238 - i * 20.0, height: 238 - i * 20.0, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: const Color(0x66000000), width: 1))),
+                  Container(width: 92, height: 92, decoration: BoxDecoration(shape: BoxShape.circle, color: const Color(0xFF181818), border: Border.all(color: const Color(0xFFEF4444), width: 3), boxShadow: const [BoxShadow(color: Color(0x88EF4444), blurRadius: 14)]), child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.play_arrow_rounded, color: Color(0xFFEF4444), size: 34), Text('SM', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 19)), Text('PLAYER', style: TextStyle(color: Colors.white70, fontSize: 8, letterSpacing: 1.5))])),
+                ]),
+              ),
+            ),
+          ]))),
+          const SizedBox(height: 28),
+          Text(item?.title ?? 'لا توجد أغنية', textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 23, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          Text(item?.artist ?? 'SM Player · Music Library', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white60, fontSize: 13)),
+          const SizedBox(height: 22),
+          SliderTheme(data: SliderTheme.of(context).copyWith(activeTrackColor: coral, thumbColor: Colors.white, inactiveTrackColor: Colors.white24), child: Slider(
+            value: position.inMilliseconds.clamp(0, maxMs.toInt()).toDouble().clamp(0, maxMs),
+            max: maxMs,
+            onChangeStart: (v) => setState(() => _dragPosition = v),
+            onChanged: (v) => setState(() => _dragPosition = v),
+            onChangeEnd: (v) { widget.handler.seek(Duration(milliseconds: v.round())); setState(() => _dragPosition = null); },
+          )),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(_time(position), style: const TextStyle(color: Colors.white54, fontSize: 12)), Text(_time(duration), style: const TextStyle(color: Colors.white54, fontSize: 12))])),
+          const SizedBox(height: 20),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+            IconButton(tooltip: _shuffle ? 'إلغاء العشوائي' : 'تشغيل عشوائي', onPressed: () { setState(() => _shuffle = !_shuffle); widget.handler.customAction('setShuffle', {'enabled': _shuffle}); }, color: _shuffle ? coral : Colors.white70, icon: const Icon(Icons.shuffle_rounded)),
+            IconButton(onPressed: () => widget.handler.skipToPrevious(), color: Colors.white, iconSize: 38, icon: const Icon(Icons.skip_previous_rounded)),
+            Container(width: 72, height: 72, decoration: const BoxDecoration(shape: BoxShape.circle, color: coral, boxShadow: [BoxShadow(color: Color(0x66EF4444), blurRadius: 20)]), child: IconButton(color: Colors.white, iconSize: 40, onPressed: () => state.playing ? widget.handler.pause() : widget.handler.play(), icon: Icon(state.playing ? Icons.pause_rounded : Icons.play_arrow_rounded))),
+            IconButton(onPressed: () => widget.handler.skipToNext(), color: Colors.white, iconSize: 38, icon: const Icon(Icons.skip_next_rounded)),
+            IconButton(tooltip: _repeat ? 'تكرار القائمة' : 'تكرار الأغنية', onPressed: () { setState(() => _repeat = !_repeat); widget.handler.customAction('setLoopMode', {'value': _repeat ? 'all' : 'one'}); }, color: _repeat ? coral : Colors.white70, icon: const Icon(Icons.repeat_rounded)),
+          ]),
+          const SizedBox(height: 20),
+          OutlinedButton.icon(onPressed: _showQueue, icon: const Icon(Icons.queue_music_rounded), label: const Text('عرض قائمة الانتظار'), style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Color(0xFF444444)), padding: const EdgeInsets.symmetric(vertical: 14))),
+          const SizedBox(height: 10),
+          const Text('تشغيل بالخلفية وشاشة القفل عبر خدمة Android media playback', textAlign: TextAlign.center, style: TextStyle(color: Colors.white38, fontSize: 11)),
+        ]));
+      },
+    ),
+  ));
 }
 
 class InternalSendScreen extends StatelessWidget {
