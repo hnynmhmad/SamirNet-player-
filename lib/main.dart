@@ -22,15 +22,22 @@ late final AudioHandler backgroundAudioHandler;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  backgroundAudioHandler = await AudioService.init(
-    builder: () => SNBackgroundAudioHandler(),
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.samirnet.player.audio',
-      androidNotificationChannelName: 'SN Player playback',
-      androidNotificationOngoing: true,
-      androidStopForegroundOnPause: true,
-    ),
-  );
+  try {
+    backgroundAudioHandler = await AudioService.init(
+      builder: () => SNBackgroundAudioHandler(),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.samirnet.player.audio',
+        androidNotificationChannelName: 'SM Player playback',
+        androidNotificationOngoing: true,
+        androidStopForegroundOnPause: true,
+      ),
+    );
+  } catch (error, stackTrace) {
+    // Keep the main player usable even if the optional background service fails.
+    debugPrint('SM Player: background audio initialization failed: $error');
+    debugPrintStack(stackTrace: stackTrace);
+    backgroundAudioHandler = SNBackgroundAudioHandler();
+  }
   runApp(const SamirNetApp());
 }
 
@@ -67,7 +74,7 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     });
   }
   Future<void> playFileInBackground(File file, String title) async {
-    final item = MediaItem(id: file.path, title: title, artist: 'SN Player');
+    final item = MediaItem(id: file.path, title: title, artist: 'SM Player');
     mediaItem.add(item);
     queue.add([item]);
     await _player.setFilePath(file.path);
@@ -90,7 +97,7 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
   Future<dynamic> customAction(String name, [Map<String, dynamic>? extras]) async {
     if (name == 'playFileInBackground') {
       final path = extras?['path'] as String?;
-      final title = extras?['title'] as String? ?? 'SN Player';
+      final title = extras?['title'] as String? ?? 'SM Player';
       if (path == null || path.isEmpty) throw ArgumentError('Missing media file path');
       await playFileInBackground(File(path), title);
     }
@@ -121,7 +128,7 @@ class _SamirNetAppState extends State<SamirNetApp> {
   }
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'SN Player', debugShowCheckedModeBanner: false, locale: const Locale('ar'),
+    title: 'SM Player', debugShowCheckedModeBanner: false, locale: const Locale('ar'),
     supportedLocales: const [Locale('ar'), Locale('en')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
     themeMode: mode,
@@ -221,7 +228,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       CircleAvatar(backgroundColor: coral, child: Icon(Icons.play_arrow_rounded, color: Colors.white)),
       SizedBox(width: 10),
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('SN Player', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        Text('SM Player', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
         Text('مشغّل الوسائط الخاص بك', style: TextStyle(fontSize: 11, color: Colors.grey)),
       ]),
     ]), actions: [
@@ -335,7 +342,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ListTile(leading: const Icon(Icons.lock_outline, color: coral), title: const Text('الخزنة الخاصة'), subtitle: const Text('تشفير ملفاتك وحمايتها برقم سري'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VaultScreen()))),
       ListTile(leading: const Icon(Icons.wifi, color: coral), title: const Text('نقل عبر Wi-Fi'), subtitle: const Text('استقبال ملفات من جهاز آخر على الشبكة نفسها'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WifiTransferScreen()))),
     ])),
-    const SizedBox(height: 20), const Center(child: Text('SN Player · 0.1.0', style: TextStyle(color: Colors.grey))),
+    const SizedBox(height: 20), const Center(child: Text('SM Player · 0.1.0', style: TextStyle(color: Colors.grey))),
   ]);
   Widget _empty(IconData icon, String title, String subtitle, String action, VoidCallback onTap) => Center(child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
     Icon(icon, size: 60, color: coral), const SizedBox(height: 16), Text(title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), const SizedBox(height: 8), Text(subtitle, textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)), const SizedBox(height: 16), FilledButton.icon(onPressed: onTap, icon: const Icon(Icons.refresh), label: Text(action)),
@@ -378,7 +385,7 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
       if (file != null) files.add(XFile(file.path, name: entry.name));
     }
     if (files.isEmpty) return;
-    await Share.shareXFiles(files, text: 'مشاركة من SN Player');
+    await Share.shareXFiles(files, text: 'مشاركة من SM Player');
   }
   void _toggleSelect(MediaEntry e) => setState(() {
     if (!selected.add(e.id)) selected.remove(e.id);
@@ -390,7 +397,7 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
     return Directionality(textDirection: TextDirection.rtl, child: Scaffold(
       appBar: AppBar(title: Text(selecting ? 'تم تحديد ${selected.length} فيديو' : 'كل الفيديوهات'), actions: [
         if (selecting) IconButton(tooltip: 'مشاركة مع التطبيقات', onPressed: _shareExternal, icon: const Icon(Icons.share)),
-        if (selecting) IconButton(tooltip: 'إرسال عبر SN Player', onPressed: () {
+        if (selecting) IconButton(tooltip: 'إرسال عبر SM Player', onPressed: () {
           final files = items.where((v) => selected.contains(v.id)).toList();
           Navigator.push(context, MaterialPageRoute(builder: (_) => InternalSendScreen(entries: files)));
         }, icon: const Icon(Icons.send_rounded)),
@@ -456,7 +463,7 @@ class InternalSendScreen extends StatelessWidget {
   Widget build(BuildContext context) => Directionality(
     textDirection: TextDirection.rtl,
     child: Scaffold(
-      appBar: AppBar(title: const Text('إرسال عبر SN Player')),
+      appBar: AppBar(title: const Text('إرسال عبر SM Player')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         Text('الملفات المحددة: ${entries.length}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
