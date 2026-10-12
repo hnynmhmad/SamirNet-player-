@@ -483,7 +483,7 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
   Future<void> _load() async {
     if (mounted) setState(() { loading = true; error = null; });
     try {
-      final permission = await PhotoManager.requestPermissionExtend();
+      final permission = await PhotoManager.requestPermissionExtend(requestOption: const PermissionRequestOption(androidPermission: AndroidPermission(type: RequestType.audio, mediaLocation: false)));
       if (!permission.isAuth && !permission.hasAccess) {
         if (mounted) setState(() => error = 'اسمح بالوصول إلى الوسائط من إعدادات Android.');
         return;
