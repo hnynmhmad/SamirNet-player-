@@ -97,12 +97,12 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
   }
   @override
   Future<void> skipToNext() async {
-    if (_player.hasNext) await _player.seekToNext();
+    if (_player.hasNext) { await _player.seekToNext(); }
   }
   @override
   Future<void> skipToPrevious() async {
-    if (_player.hasPrevious) await _player.seekToPrevious();
-    else await _player.seek(Duration.zero);
+    if (_player.hasPrevious) { await _player.seekToPrevious(); }
+    else { await _player.seek(Duration.zero); }
   }
   @override
   Future<void> play() => _player.play();
@@ -688,17 +688,30 @@ class MusicPlayerScreen extends StatefulWidget {
   @override
   State<MusicPlayerScreen> createState() => _MusicPlayerScreenState();
 }
-class _MusicPlayerScreenState extends State<MusicPlayerScreen> {
+class _MusicPlayerScreenState extends State<MusicPlayerScreen> with SingleTickerProviderStateMixin {
   bool _shuffle = false, _repeat = false;
   double? _dragPosition;
   StreamSubscription<MediaItem?>? _mediaSub;
+  StreamSubscription<PlaybackState>? _playbackSub;
+  late final AnimationController _discController;
   @override
   void initState() {
     super.initState();
+    _discController = AnimationController(vsync: this, duration: const Duration(seconds: 12));
     _mediaSub = widget.handler.mediaItem.listen((_) { if (mounted) setState(() {}); });
+    _playbackSub = widget.handler.playbackState.listen((state) {
+      if (state.playing && !_discController.isAnimating) { _discController.repeat(); }
+      else if (!state.playing && _discController.isAnimating) { _discController.stop(); }
+    });
+    if (widget.handler.playbackState.value.playing) { _discController.repeat(); }
   }
   @override
-  void dispose() { _mediaSub?.cancel(); super.dispose(); }
+  void dispose() {
+    _mediaSub?.cancel();
+    _playbackSub?.cancel();
+    _discController.dispose();
+    super.dispose();
+  }
   String _time(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -805,10 +818,8 @@ class _MusicPlayerScreenState extends State<MusicPlayerScreen> {
           const Center(child: Text('NOW PLAYING', style: TextStyle(color: Color(0xFFEF4444), letterSpacing: 3, fontWeight: FontWeight.w700))),
           const SizedBox(height: 26),
           Center(child: SizedBox(width: 270, height: 270, child: Stack(alignment: Alignment.center, children: [
-            AnimatedRotation(
-              turns: state.playing ? 1 : 0,
-              duration: const Duration(seconds: 16),
-              curve: Curves.linear,
+            RotationTransition(
+              turns: _discController,
               child: Container(
                 width: 260, height: 260,
                 decoration: BoxDecoration(shape: BoxShape.circle, gradient: const RadialGradient(colors: [Color(0xFFF5F5F5), Color(0xFF8A8A8A), Color(0xFFDADADA), Color(0xFF454545), Color(0xFFBEBEBE), Color(0xFF242424)], stops: [0, .18, .34, .49, .68, 1]), boxShadow: [BoxShadow(color: coral.withOpacity(.32), blurRadius: 28, spreadRadius: 2)]),
