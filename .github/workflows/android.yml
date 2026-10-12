@@ -77,9 +77,13 @@ jobs:
               if gradle.suffix == '.kts':
                   # Kotlin DSL requires the plugins block before ordinary statements.
                   # Use fully-qualified Java classes and insert keystore loading after plugins.
-                  load = 'val keystoreProperties = java.util.Properties()' + chr(10) + 'val keystorePropertiesFile = rootProject.file("key.properties")' + chr(10) + 'if (!keystorePropertiesFile.exists()) error("Release signing key.properties is missing")' + chr(10) + 'keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))' + chr(10) + chr(10)
-                  if 'val keystoreProperties = java.util.Properties()' not in text:
-                      match = re.search(r'(?s)plugins\s*\{.*?\}', text)
+                  # Kotlin DSL imports must be at the very beginning of the script.
+                  text = re.sub(r'(?m)^import java\\.util\\.Properties\\s*\\n', '', text)
+                  text = re.sub(r'(?m)^import java\\.io\\.FileInputStream\\s*\\n', '', text)
+                  text = 'import java.util.Properties' + chr(10) + 'import java.io.FileInputStream' + chr(10) + text
+                  load = 'val keystoreProperties = Properties()' + chr(10) + 'val keystorePropertiesFile = rootProject.file("key.properties")' + chr(10) + 'if (!keystorePropertiesFile.exists()) error("Release signing key.properties is missing")' + chr(10) + 'keystoreProperties.load(FileInputStream(keystorePropertiesFile))' + chr(10) + chr(10)
+                  if 'val keystoreProperties = Properties()' not in text:
+                      match = re.search(r'(?s)plugins\\s*\\{.*?\\}', text)
                       if not match:
                           raise SystemExit('Could not find plugins block in Kotlin Gradle file')
                       text = text[:match.end()] + chr(10) + chr(10) + load + text[match.end():]
