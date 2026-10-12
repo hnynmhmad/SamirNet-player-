@@ -163,7 +163,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Set<String> favorites = {};
   List<String> history = [];
   bool foldersGrid = false;
-  String videoSort = 'nameAsc';
+  String videoSort = 'dateDesc';
+  String backgroundMode = 'audio';
   @override
   void initState() { super.initState(); _loadLocal(); _scan(); }
   @override
@@ -171,7 +172,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _loadLocal() async {
     final p = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() { favorites = (p.getStringList('favorites') ?? []).toSet(); history = p.getStringList('history') ?? []; });
+    setState(() { favorites = (p.getStringList('favorites') ?? []).toSet(); history = p.getStringList('history') ?? []; backgroundMode = p.getString('background_mode') ?? 'audio'; });
   }
   Future<void> _openPermissionSettings() async {
     try {
@@ -262,7 +263,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (tab == 0) ...[
           const SizedBox(height: 4),
           Row(children: [
-            Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () { Navigator.push(context, MaterialPageRoute(builder: (_) => VideosLibraryScreen(entries: videos, initialFavorites: favorites, onPlay: _play, onFavorite: _favorite))); })),
+            Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () { Navigator.push(context, MaterialPageRoute(builder: (_) => VideosLibraryScreen(entries: videos, initialFavorites: favorites, onPlay: _play, onFavorite: _favorite, onDeleted: _scan))); })),
             const SizedBox(width: 10),
             Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () => Navigator.push(context, MaterialPageRoute(builder: (_) => AudioLibraryScreen(onPlay: _play))))),
           ]),
@@ -332,6 +333,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     const Text('الإعدادات', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
     const SizedBox(height: 12),
     Card(child: Column(children: [
+      const ListTile(leading: Icon(Icons.play_circle_outline, color: coral), title: Text('التشغيل خارج التطبيق', style: TextStyle(fontWeight: FontWeight.bold)), subtitle: Text('اختر طريقة التشغيل بالخلفية')),
+      RadioListTile<String>(value: 'audio', groupValue: backgroundMode, onChanged: (v) async { if (v == null) return; final p = await SharedPreferences.getInstance(); await p.setString('background_mode', v); if (mounted) setState(() => backgroundMode = v); }, title: const Text('الصوت فقط في الخلفية'), subtitle: const Text('إشعار للتحكم بالصوت')),
+      RadioListTile<String>(value: 'pip', groupValue: backgroundMode, onChanged: (v) async { if (v == null) return; final p = await SharedPreferences.getInstance(); await p.setString('background_mode', v); if (mounted) setState(() => backgroundMode = v); }, title: const Text('فيديو في نافذة عائمة'), subtitle: const Text('Picture-in-Picture من Android')),
+    ])),
+    const SizedBox(height: 12),
+    Card(child: Column(children: [
       const ListTile(leading: Icon(Icons.palette_outlined), title: Text('المظهر', style: TextStyle(fontWeight: FontWeight.bold))),
       RadioListTile<ThemeMode>(title: const Text('اتباع مظهر النظام'), value: ThemeMode.system, groupValue: widget.mode, onChanged: (v) { if (v != null) widget.onMode(v); }),
       RadioListTile<ThemeMode>(title: const Text('الوضع الفاتح'), value: ThemeMode.light, groupValue: widget.mode, onChanged: (v) { if (v != null) widget.onMode(v); }),
@@ -352,11 +359,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
 
 class VideosLibraryScreen extends StatefulWidget {
-  const VideosLibraryScreen({required this.entries, required this.initialFavorites, required this.onPlay, required this.onFavorite, super.key});
+  const VideosLibraryScreen({required this.entries, required this.initialFavorites, required this.onPlay, required this.onFavorite, required this.onDeleted, super.key});
   final List<MediaEntry> entries;
   final Set<String> initialFavorites;
   final ValueChanged<MediaEntry> onPlay;
   final ValueChanged<MediaEntry> onFavorite;
+  final VoidCallback onDeleted;
   @override
   State<VideosLibraryScreen> createState() => _VideosLibraryScreenState();
 }
@@ -371,6 +379,9 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
         case 'nameDesc': return b.name.toLowerCase().compareTo(a.name.toLowerCase());
         case 'durationDesc': return b.duration.compareTo(a.duration);
         case 'durationAsc': return a.duration.compareTo(b.duration);
+        case 'dateAsc': return a.asset.createDateTime.compareTo(b.asset.createDateTime);
+        case 'dateDesc': return b.asset.createDateTime.compareTo(a.asset.createDateTime);
+        case 'nameAZ': return a.name.toLowerCase().compareTo(b.name.toLowerCase());
         case 'nameAsc':
         default: return a.name.toLowerCase().compareTo(b.name.toLowerCase());
       }
@@ -390,12 +401,30 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
     if (!selected.add(e.id)) selected.remove(e.id);
     selecting = selected.isNotEmpty;
   });
+  Future<void> _deleteSelected() async {
+    if (selected.isEmpty) return;
+    final confirm = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('تأكيد حذف الفيديوهات'),
+      content: Text('هل تريد طلب حذف ${selected.length} فيديو من الهاتف؟ قد يعرض Android تأكيدًا إضافيًا.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('حذف'))],
+    ));
+    if (confirm != true || !mounted) return;
+    try {
+      final ids = sorted.where((v) => selected.contains(v.id)).map((v) => v.id).toList();
+      final deleted = await PhotoManager.editor.deleteWithIds(ids);
+      if (!mounted) return;
+      setState(() { selected.clear(); selecting = false; });
+      widget.onDeleted();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تم طلب حذف ${deleted.length} فيديو')));
+    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر حذف الملفات: $e'))); }
+  }
   @override
   Widget build(BuildContext context) {
     final items = sorted;
     return Directionality(textDirection: TextDirection.rtl, child: Scaffold(
       appBar: AppBar(title: Text(selecting ? 'تم تحديد ${selected.length} فيديو' : 'كل الفيديوهات'), actions: [
         if (selecting) IconButton(tooltip: 'مشاركة مع التطبيقات', onPressed: _shareExternal, icon: const Icon(Icons.share)),
+        if (selecting) IconButton(tooltip: 'حذف المحدد', onPressed: _deleteSelected, icon: const Icon(Icons.delete_outline)),
         if (selecting) IconButton(tooltip: 'إرسال عبر SM Player', onPressed: () {
           final files = items.where((v) => selected.contains(v.id)).toList();
           Navigator.push(context, MaterialPageRoute(builder: (_) => InternalSendScreen(entries: files)));
@@ -405,6 +434,8 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
           PopupMenuItem(value: 'nameAsc', child: Text('الاسم: أ إلى ي')),
           PopupMenuItem(value: 'nameDesc', child: Text('الاسم: ي إلى أ')),
           PopupMenuItem(value: 'nameAZ', child: Text('الاسم: A إلى Z')),
+          PopupMenuItem(value: 'dateDesc', child: Text('الأحدث أولًا')),
+          PopupMenuItem(value: 'dateAsc', child: Text('الأقدم أولًا')),
           PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')),
           PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا')),
         ]),
@@ -436,23 +467,63 @@ class AudioLibraryScreen extends StatefulWidget {
   State<AudioLibraryScreen> createState() => _AudioLibraryScreenState();
 }
 class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
-  bool loading=true;
-  String? error;
-  List<MediaEntry> audio=[];
+  bool loading = true, showAll = false;
+  String? error, selectedFolder;
+  List<MediaEntry> audio = [];
   @override
-  void initState(){super.initState();_load();}
+  void initState() { super.initState(); _load(); }
   Future<void> _load() async {
+    if (mounted) setState(() { loading = true; error = null; });
     try {
-      final permission=await PhotoManager.requestPermissionExtend();
-      if(!permission.isAuth && !permission.hasAccess) { setState(()=>error='اسمح بالوصول إلى ملفات الوسائط من إعدادات Android.'); return; }
-      final paths=await PhotoManager.getAssetPathList(type:RequestType.audio,onlyAll:true);
-      final assets=paths.isEmpty?<AssetEntity>[]:await paths.first.getAssetListRange(start:0,end:2000);
-      if(mounted)setState(()=>audio=assets.map(MediaEntry.new).toList());
-    } catch(e) { if(mounted)setState(()=>error='تعذر تحميل الصوتيات: $e'); }
-    finally { if(mounted)setState(()=>loading=false);}
+      final permission = await PhotoManager.requestPermissionExtend();
+      if (!permission.isAuth && !permission.hasAccess) {
+        if (mounted) setState(() => error = 'اسمح بالوصول إلى الوسائط من إعدادات Android.');
+        return;
+      }
+      final paths = await PhotoManager.getAssetPathList(type: RequestType.audio, onlyAll: true);
+      final assets = paths.isEmpty ? <AssetEntity>[] : await paths.first.getAssetListRange(start: 0, end: 5000);
+      if (mounted) setState(() { audio = assets.map(MediaEntry.new).toList(); selectedFolder = null; });
+    } catch (e) { if (mounted) setState(() => error = 'تعذر تحميل الصوتيات: $e'); }
+    finally { if (mounted) setState(() => loading = false); }
+  }
+  Map<String, List<MediaEntry>> get folders {
+    final result = <String, List<MediaEntry>>{};
+    for (final item in audio) {
+      final raw = (item.asset.relativePath ?? '').replaceAll('\\\\', '/').replaceAll(RegExp(r'/+$'), '');
+      final parts = raw.split('/').where((p) => p.trim().isNotEmpty).toList();
+      final name = parts.isEmpty ? 'المجلد الرئيسي' : parts.last;
+      result.putIfAbsent(name, () => []).add(item);
+    }
+    return result;
   }
   @override
-  Widget build(BuildContext context)=>Directionality(textDirection:TextDirection.rtl,child:Scaffold(appBar:AppBar(title:const Text('الصوتيات')),body:loading?const Center(child:CircularProgressIndicator()):error!=null?Center(child:Padding(padding:const EdgeInsets.all(20),child:Text(error!))):audio.isEmpty?const Center(child:Text('لم يتم العثور على ملفات صوتية')):ListView.builder(itemCount:audio.length,itemBuilder:(context,i){final e=audio[i];return ListTile(leading:const CircleAvatar(backgroundColor:Color(0x223979D5),child:Icon(Icons.music_note,color:Color(0xFF3979D5))),title:Text(e.name,maxLines:2,overflow:TextOverflow.ellipsis),subtitle:Text(_formatDuration(e.duration)),trailing:const Icon(Icons.play_arrow),onTap:()=>widget.onPlay(e));})));
+  Widget build(BuildContext context) {
+    final groups = folders;
+    final items = selectedFolder == null ? audio : (groups[selectedFolder] ?? <MediaEntry>[]);
+    return Directionality(textDirection: TextDirection.rtl, child: Scaffold(
+      appBar: AppBar(title: Text(selectedFolder ?? 'الصوتيات'), actions: [
+        IconButton(tooltip: 'تحديث الصوتيات', onPressed: _load, icon: const Icon(Icons.refresh)),
+        if (selectedFolder != null) IconButton(tooltip: 'رجوع للمجلدات', onPressed: () => setState(() => selectedFolder = null), icon: const Icon(Icons.folder)),
+      ]),
+      body: loading ? const Center(child: CircularProgressIndicator())
+        : error != null ? Center(child: Padding(padding: const EdgeInsets.all(20), child: Column(mainAxisSize: MainAxisSize.min, children: [Text(error!, textAlign: TextAlign.center), const SizedBox(height: 12), FilledButton.icon(onPressed: _load, icon: const Icon(Icons.refresh), label: const Text('إعادة المحاولة'))])))
+        : audio.isEmpty ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.music_off, size: 56, color: coral), const SizedBox(height: 12), const Text('لم يتم العثور على ملفات صوتية'), const SizedBox(height: 8), const Text('تأكد من منح إذن الصوتيات ثم اضغط تحديث.', textAlign: TextAlign.center), const SizedBox(height: 12), FilledButton.icon(onPressed: _load, icon: const Icon(Icons.refresh), label: const Text('تحديث المكتبة'))])))
+        : selectedFolder == null && !showAll ? Column(children: [
+            Padding(padding: const EdgeInsets.all(12), child: Row(children: [Expanded(child: Text('${audio.length} ملف صوتي · ${groups.length} مجلد')), TextButton.icon(onPressed: () => setState(() => showAll = true), icon: const Icon(Icons.library_music), label: const Text('عرض الكل'))])),
+            Expanded(child: ListView.builder(itemCount: groups.length, itemBuilder: (context, i) {
+              final entry = groups.entries.elementAt(i);
+              return Card(margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: ListTile(leading: const CircleAvatar(child: Icon(Icons.folder, color: Color(0xFF3979D5))), title: Text(entry.key), subtitle: Text('${entry.value.length} ملف صوتي'), trailing: const Icon(Icons.chevron_left), onTap: () => setState(() => selectedFolder = entry.key)));
+            })),
+          ])
+        : Column(children: [
+            if (selectedFolder == null) Align(alignment: Alignment.centerRight, child: TextButton.icon(onPressed: () => setState(() => showAll = false), icon: const Icon(Icons.folder), label: const Text('عرض المجلدات'))),
+            Expanded(child: ListView.builder(itemCount: items.length, itemBuilder: (context, i) {
+              final e = items[i];
+              return ListTile(leading: const CircleAvatar(child: Icon(Icons.music_note, color: Color(0xFF3979D5))), title: Text(e.name, maxLines: 2, overflow: TextOverflow.ellipsis), subtitle: Text(_formatDuration(e.duration)), trailing: const Icon(Icons.play_arrow), onTap: () => widget.onPlay(e));
+            })),
+          ]),
+    ));
+  }
 }
 
 class InternalSendScreen extends StatelessWidget {
@@ -625,13 +696,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
   Future<void> _startBackgroundAudio() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final mode = prefs.getString('background_mode') ?? 'audio';
+      if (mode == 'pip') {
+        final result = await const MethodChannel('com.samirnet.snplayer/pip').invokeMethod<bool>('enterPip');
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result == true ? 'تم طلب نافذة الفيديو العائمة.' : 'تعذر تشغيل النافذة العائمة؛ تحقق من دعم Picture-in-Picture في Android.')));
+        return;
+      }
       final handler = await _getBackgroundAudioHandler();
       await handler.customAction('playFileInBackground', {'path': widget.file.path, 'title': widget.entry.name});
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يستمر الصوت في الخلفية مع إشعار التحكم. يمكنك الخروج من التطبيق.')));
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الصوت في الخلفية: $e')));
-    }
+      await controller.pause();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يستمر الصوت فقط في الخلفية مع إشعار التحكم.')));
+    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الخلفية: $e'))); }
   }
   Future<void> _toggleFullscreen() async {
     final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
