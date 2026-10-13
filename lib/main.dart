@@ -103,7 +103,9 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       initialIndex: start,
     );
     if (startPosition > Duration.zero) await _player.seek(startPosition, index: start);
-    await _player.play();
+    // Do not await play(): just_audio completes this future when playback ends.
+    // Awaiting it blocked the caller, leaving the video player audible at the same time.
+    unawaited(_player.play());
   }
   @override
   Future<void> skipToNext() async {
@@ -1284,6 +1286,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     else { VolumeController().setVolume(level); _showLevelOverlay('الصوت', Icons.volume_up_rounded, level); }
   }
   Future<void> _startBackgroundAudio() async {
+    final wasPlaying = controller.value.isPlaying;
+    final resumePosition = controller.value.position;
     try {
       final prefs = await SharedPreferences.getInstance();
       final mode = prefs.getString('background_mode') ?? 'audio';
@@ -1292,13 +1296,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result == true ? 'تم طلب نافذة الفيديو العائمة.' : 'تعذر تشغيل النافذة العائمة؛ تحقق من دعم Picture-in-Picture في Android.')));
         return;
       }
-      final handler = await _getBackgroundAudioHandler();
-      final resumePosition = controller.value.position;
-      await prefs.setInt('resume_${widget.entry.id}', resumePosition.inMilliseconds);
-      await handler.customAction('playFileInBackground', {'path': widget.file.path, 'title': 'فيديو · ${widget.entry.name}', 'positionMs': resumePosition.inMilliseconds});
+      // Stop the video decoder/audio output before starting the audio-only player.
+      // Both players use the same file and position, but only one may produce sound.
       await controller.pause();
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يستمر صوت الفيديو نفسه من موضعه في الخلفية مع إشعار تحكم خاص.')));
-    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الخلفية: $e'))); }
+      await prefs.setInt('resume_${widget.entry.id}', resumePosition.inMilliseconds);
+      final handler = await _getBackgroundAudioHandler();
+      await handler.customAction('playFileInBackground', {'path': widget.file.path, 'title': 'فيديو · ${widget.entry.name}', 'positionMs': resumePosition.inMilliseconds});
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم نقل صوت الفيديو إلى مشغل الخلفية من الموضع نفسه. سيظهر إشعار التحكم أثناء التشغيل.')));
+    } catch (e) {
+      // If background playback fails, restore the visible video instead of leaving it paused.
+      if (wasPlaying && mounted) {
+        try { await controller.play(); } catch (_) {}
+      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الخلفية: $e')));
+    }
   }
   Future<void> _toggleFullscreen() async {
     final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
