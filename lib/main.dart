@@ -707,6 +707,7 @@ class AudioStudioScreen extends StatefulWidget {
 class _AudioStudioScreenState extends State<AudioStudioScreen> {
   bool loading = true;
   bool enabled = false;
+  bool equalizerAvailable = true;
   String? error;
   double minDb = -15, maxDb = 15, speed = 1;
   List<double> gains = [];
@@ -720,8 +721,9 @@ class _AudioStudioScreenState extends State<AudioStudioScreen> {
   }
 
   Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    speed = (prefs.getDouble('music_speed_v1') ?? speed).clamp(.5, 2.0).toDouble();
     try {
-      final prefs = await SharedPreferences.getInstance();
       final raw = await widget.handler.customAction('getEqualizerParameters') as Map?;
       if (raw == null) throw StateError('لم تصل إعدادات المعادل');
       final bands = (raw['bands'] as List? ?? const []).cast<Map>();
@@ -733,16 +735,17 @@ class _AudioStudioScreenState extends State<AudioStudioScreen> {
           ? (double.tryParse(saved[i]) ?? (bands[i]['gain'] as num).toDouble()).clamp(minDb, maxDb).toDouble()
           : (bands[i]['gain'] as num).toDouble());
       enabled = prefs.getBool('music_eq_enabled_v1') ?? false;
-      speed = (prefs.getDouble('music_speed_v1') ?? speed).clamp(.5, 2.0).toDouble();
       await widget.handler.customAction('setEqualizerEnabled', {'enabled': enabled});
       for (var i = 0; i < saved.length && i < gains.length; i++) {
         await widget.handler.customAction('setEqualizerBandGain', {'index': i, 'gain': gains[i]});
       }
-      await widget.handler.customAction('setMusicSpeed', {'speed': speed});
-      if (mounted) setState(() => loading = false);
-    } catch (e) {
-      if (mounted) setState(() { loading = false; error = 'تعذر تشغيل المعادل على هذا الجهاز: $e'; });
+    } catch (_) {
+      // Some Android devices cannot create a native Equalizer instance. Keep playback and speed controls available.
+      equalizerAvailable = false;
+      enabled = false;
     }
+    try { await widget.handler.customAction('setMusicSpeed', {'speed': speed}); } catch (_) {}
+    if (mounted) setState(() => loading = false);
   }
 
   Future<void> _toggle(bool value) async {
@@ -788,9 +791,9 @@ class _AudioStudioScreenState extends State<AudioStudioScreen> {
       backgroundColor: const Color(0xFF090909),
       appBar: AppBar(backgroundColor: const Color(0xFF090909), foregroundColor: Colors.white, title: const Text('استوديو الصوت')),
       body: loading ? const Center(child: CircularProgressIndicator(color: coral))
-        : error != null ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white))))
         : ListView(padding: const EdgeInsets.all(16), children: [
-          Container(
+          if (!equalizerAvailable) const Padding(padding: EdgeInsets.only(bottom: 12), child: Text('المعادل الصوتي غير متاح على هذا الجهاز؛ بقي التحكم بسرعة الموسيقى متاحًا.', style: TextStyle(color: Colors.orangeAccent))),
+          if (equalizerAvailable) Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(color: const Color(0xFF191919), borderRadius: BorderRadius.circular(20), border: Border.all(color: coral.withOpacity(.5))),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -809,7 +812,7 @@ class _AudioStudioScreenState extends State<AudioStudioScreen> {
             ]),
           ),
           const SizedBox(height: 14),
-          Container(
+          if (equalizerAvailable) Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(color: const Color(0xFF191919), borderRadius: BorderRadius.circular(20)),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
