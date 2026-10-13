@@ -282,7 +282,7 @@ class _LibraryScreenState extends State<LibraryScreen> with WidgetsBindingObserv
         final all = paths.first;
         final total = await all.assetCountAsync;
         for (var start = 0; start < total; start += 200) {
-          assets.addAll(await all.getAssetListRange(start: start, end: (start + 200).clamp(0, total)));
+          assets.addAll(await all.getAssetListRange(start: start, end: (start + 200).clamp(0, total).toInt()));
         }
       }
       if (mounted) setState(() { videos = assets.map(MediaEntry.new).toList(); loading = false; denied = false; scanError = null; });
@@ -625,7 +625,14 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
         return;
       }
       final paths = await PhotoManager.getAssetPathList(type: RequestType.audio, onlyAll: true);
-      final assets = paths.isEmpty ? <AssetEntity>[] : await paths.first.getAssetListRange(start: 0, end: 5000);
+      final assets = <AssetEntity>[];
+      if (paths.isNotEmpty) {
+        final all = paths.first;
+        final total = await all.assetCountAsync;
+        for (var start = 0; start < total; start += 200) {
+          assets.addAll(await all.getAssetListRange(start: start, end: (start + 200).clamp(0, total).toInt()));
+        }
+      }
       if (mounted) setState(() { audio = assets.map(MediaEntry.new).toList(); selectedFolder = null; });
     } catch (e) { if (mounted) setState(() => error = 'تعذر تحميل الصوتيات: $e'); }
     finally { if (mounted) setState(() => loading = false); }
@@ -1129,6 +1136,7 @@ class _FolderVideosScreenState extends State<FolderVideosScreen> {
   Future<void> _saveViewPrefs() async {
     final p = await SharedPreferences.getInstance();
     await p.setString('video_sort', sort);
+    await p.setBool('global_media_grid', grid);
     await p.setBool('video_grid', grid);
   }
   List<MediaEntry> get sortedEntries => _sortEntries(widget.entries, sort);
