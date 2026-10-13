@@ -460,11 +460,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
       Expanded(child: entries.isEmpty ? const Center(child: Text('لا توجد مجلدات فيديو متاحة')) : foldersGrid
         ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.35, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (context, i) {
             final e = entries[i];
-            return Card(child: InkWell(borderRadius: BorderRadius.circular(12), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: e.key, entries: e.value, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite))), child: Padding(padding: const EdgeInsets.all(12), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [const Icon(Icons.folder_rounded, color: coral, size: 34), const SizedBox(height: 8), Text(e.key, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)), Text('${e.value.length} فيديو', style: const TextStyle(color: Colors.grey))]))));
+            return Card(child: InkWell(borderRadius: BorderRadius.circular(12), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: _folderLabel(e.key), entries: e.value, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite))), child: Padding(padding: const EdgeInsets.all(12), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [const Icon(Icons.folder_rounded, color: coral, size: 34), const SizedBox(height: 8), Text(_folderLabel(e.key), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)), Text('${e.value.length} فيديو', style: const TextStyle(color: Colors.grey))]))));
           })
         : ListView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, itemBuilder: (context, i) {
             final e = entries[i];
-            return Card(child: ListTile(leading: const Icon(Icons.folder_rounded, color: coral), title: Text(e.key, maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text('${e.value.length} فيديو'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: e.key, entries: e.value, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)))));
+            return Card(child: ListTile(leading: const Icon(Icons.folder_rounded, color: coral), title: Text(_folderLabel(e.key), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text('${e.value.length} فيديو'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: e.key, entries: e.value, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)))));
           })),
     ]);
   }
@@ -651,7 +651,14 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
         return;
       }
       final paths = await PhotoManager.getAssetPathList(type: RequestType.audio, onlyAll: true);
-      final assets = paths.isEmpty ? <AssetEntity>[] : await paths.first.getAssetListRange(start: 0, end: 5000);
+      final assets = <AssetEntity>[];
+      if (paths.isNotEmpty) {
+        final all = paths.first;
+        final total = await all.assetCountAsync;
+        for (var start = 0; start < total; start += 200) {
+          assets.addAll(await all.getAssetListRange(start: start, end: (start + 200).clamp(0, total).toInt()));
+        }
+      }
       if (mounted) setState(() { audio = assets.map(MediaEntry.new).toList(); selectedFolder = null; });
     } catch (e) { if (mounted) setState(() => error = 'تعذر تحميل الصوتيات: $e'); }
     finally { if (mounted) setState(() => loading = false); }
@@ -662,7 +669,7 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
       final raw = (item.asset.relativePath ?? '').replaceAll('\\\\', '/').replaceAll(RegExp(r'/+$'), '');
       final parts = raw.split('/').where((p) => p.trim().isNotEmpty).toList();
       final name = parts.isEmpty ? 'المجلد الرئيسي' : parts.last;
-      result.putIfAbsent(name, () => []).add(item);
+      result.putIfAbsent(raw.isEmpty ? '__root__' : raw, () => []).add(item);
     }
     return result;
   }
@@ -1198,6 +1205,12 @@ class _FolderVideosScreenState extends State<FolderVideosScreen> {
           }),
     ),
   );
+}
+
+String _folderLabel(String path) {
+  if (path == '__root__' || path.trim().isEmpty) return 'المجلد الرئيسي';
+  final parts = path.replaceAll('\\\\', '/').split('/').where((part) => part.trim().isNotEmpty).toList();
+  return parts.isEmpty ? 'المجلد الرئيسي' : parts.last;
 }
 
 String _formatDuration(Duration d) {
