@@ -44,16 +44,16 @@ jobs:
               d.rounded_rectangle((inset, inset, size-inset-1, size-inset-1),
                                   radius=int(size*.22), fill=(220, 38, 38, 255))
               # A clear white play triangle on a solid red background.
-              d.polygon([(int(size*.36), int(size*.23)),
-                         (int(size*.36), int(size*.77)),
-                         (int(size*.78), int(size*.50))], fill='white')
+              d.polygon([(int(size*.39), int(size*.31)),
+                         (int(size*.39), int(size*.69)),
+                         (int(size*.68), int(size*.50))], fill='white')
               image.save(root / f'mipmap-{density}' / 'ic_launcher.png')
           drawable = root / 'drawable'
           drawable.mkdir(parents=True, exist_ok=True)
           (drawable / 'ic_launcher_foreground.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-              <path android:fillColor="#FFFFFFFF" android:pathData="M34,22 L34,86 L82,54 Z"/>
+              <path android:fillColor="#FFFFFFFF" android:pathData="M39,31 L39,77 L70,54 Z"/>
           </vector>
           ''')
           (root / 'values').mkdir(parents=True, exist_ok=True)
