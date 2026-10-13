@@ -273,7 +273,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _loadLocal() async {
     final p = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() { favorites = (p.getStringList('favorites') ?? []).toSet(); history = p.getStringList('history') ?? []; backgroundMode = p.getString('background_mode') ?? 'audio'; videoSort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('video_grid') ?? true; foldersGrid = p.getBool('global_media_grid') ?? p.getBool('folders_grid') ?? false; newMediaIds = (p.getStringList('new_media_ids') ?? []).toSet(); seenFolderPaths = (p.getStringList('seen_folder_paths') ?? []).toSet(); });
+    setState(() { favorites = (p.getStringList('favorites') ?? []).toSet(); history = p.getStringList('history') ?? []; backgroundMode = p.getString('background_mode') ?? 'audio'; videoSort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('global_media_grid') ?? p.getBool('video_grid') ?? true; foldersGrid = p.getBool('global_media_grid') ?? p.getBool('folders_grid') ?? false; newMediaIds = (p.getStringList('new_media_ids') ?? []).toSet(); seenFolderPaths = (p.getStringList('seen_folder_paths') ?? []).toSet(); });
   }
   Future<void> _openPermissionSettings() async {
     try {
@@ -443,6 +443,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ])
       : ListTile(leading: SizedBox(width: 86, height: 64, child: FutureBuilder<Uint8List?>(future: thumb, builder: (_, s) => s.data == null ? const Icon(Icons.movie) : ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.memory(s.data!, fit: BoxFit.cover)))), title: Text(v.name, maxLines: 2, overflow: TextOverflow.ellipsis), subtitle: Text(newMediaIds.contains(v.id) ? 'NEW · $duration' : duration, style: TextStyle(color: newMediaIds.contains(v.id) ? coral : null, fontWeight: newMediaIds.contains(v.id) ? FontWeight.bold : null)), trailing: IconButton(onPressed: () => _favorite(v), icon: Icon(favorites.contains(v.id) ? Icons.favorite : Icons.favorite_border, color: coral)))));
   }
+  Future<void> _openFolder(String path, List<MediaEntry> entries) async {
+    seenFolderPaths.add(path);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('seen_folder_paths', seenFolderPaths.toList());
+    if (!mounted) return;
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: _folderLabel(path), entries: entries, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)));
+    if (mounted) setState(() {});
+  }
   Widget _folders() {
     final groups = <String, List<MediaEntry>>{};
     for (final v in videos) {
@@ -460,7 +468,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       Expanded(child: entries.isEmpty ? const Center(child: Text('لا توجد مجلدات فيديو متاحة')) : foldersGrid
         ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.35, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (context, i) {
             final e = entries[i];
-            return Card(child: InkWell(borderRadius: BorderRadius.circular(12), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: _folderLabel(e.key), entries: e.value, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite))), child: Padding(padding: const EdgeInsets.all(12), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [const Icon(Icons.folder_rounded, color: coral, size: 34), const SizedBox(height: 8), Text(_folderLabel(e.key), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)), Text('${e.value.length} فيديو', style: const TextStyle(color: Colors.grey))]))));
+            return Card(child: InkWell(borderRadius: BorderRadius.circular(12), onTap: () => _openFolder(e.key, e.value), child: Padding(padding: const EdgeInsets.all(12), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [const Icon(Icons.folder_rounded, color: coral, size: 34), const SizedBox(height: 8), Text(_folderLabel(e.key) + (e.value.any((v) => newMediaIds.contains(v.id)) && !seenFolderPaths.contains(e.key) ? ' · NEW' : ''), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)), Text('${e.value.length} فيديو', style: const TextStyle(color: Colors.grey))]))));
           })
         : ListView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, itemBuilder: (context, i) {
             final e = entries[i];
