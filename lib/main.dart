@@ -1118,14 +1118,24 @@ class _FolderVideosScreenState extends State<FolderVideosScreen> {
         ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: sortedEntries.length, gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 240, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: .8), itemBuilder: (context, index) {
             final entry = sortedEntries[index];
             return Card(child: InkWell(onTap: () => widget.onPlay(entry), child: Column(children: [
-              Expanded(child: FutureBuilder<Uint8List?>(future: entry.asset.thumbnailDataWithSize(const ThumbnailSize(480,320)), builder: (_, s) => s.data == null ? const Icon(Icons.movie_outlined) : Image.memory(s.data!, fit: BoxFit.cover, width: double.infinity))),
-              Padding(padding: const EdgeInsets.all(8), child: Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis)),
-              IconButton(onPressed: () => widget.onFavorite(entry), icon: Icon(widget.isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: coral)),
+              Expanded(child: Stack(fit: StackFit.expand, children: [
+                FutureBuilder<Uint8List?>(future: entry.asset.thumbnailDataWithSize(const ThumbnailSize(480,320)), builder: (_, snap) => snap.data == null ? const Center(child: Icon(Icons.movie_outlined, size: 40)) : Image.memory(snap.data!, fit: BoxFit.cover, width: double.infinity)),
+                Positioned(bottom: 6, right: 6, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3), decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(5)), child: Text(_formatDuration(entry.duration), style: const TextStyle(color: Colors.white, fontSize: 11)))),
+              ])),
+              Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), child: Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis)),
+              IconButton(onPressed: () => widget.onFavorite(entry), icon: Icon(widget.isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: widget.isFavorite(entry) ? coral : coral)),
             ])));
           })
         : ListView.builder(padding: const EdgeInsets.all(12), itemCount: sortedEntries.length, itemBuilder: (context, index) {
-            final entry = widget.entries[index];
-            return Card(child: ListTile(title: Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis), subtitle: Text(_formatDuration(entry.duration)), trailing: IconButton(onPressed: () => widget.onFavorite(entry), icon: Icon(widget.isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: coral)), onTap: () => widget.onPlay(entry)));
+            final entry = sortedEntries[index];
+            return Card(child: ListTile(
+              leading: SizedBox(width: 76, height: 62, child: Stack(fit: StackFit.expand, children: [
+                FutureBuilder<Uint8List?>(future: entry.asset.thumbnailDataWithSize(const ThumbnailSize(240, 180)), builder: (_, snap) => snap.data == null ? const ColoredBox(color: Color(0x22111111), child: Icon(Icons.movie_outlined)) : ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.memory(snap.data!, fit: BoxFit.cover))),
+                Positioned(bottom: 2, left: 2, child: Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2), decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(4)), child: Text(_formatDuration(entry.duration), style: const TextStyle(color: Colors.white, fontSize: 10)))),
+              ])),
+              title: Text(entry.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+              trailing: IconButton(onPressed: () => widget.onFavorite(entry), icon: Icon(widget.isFavorite(entry) ? Icons.favorite : Icons.favorite_border, color: coral)),
+              onTap: () => widget.onPlay(entry)));
           }),
     ),
   );
@@ -1405,6 +1415,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           IconButton(tooltip: 'الفيديو التالي', onPressed: () => _navigatePlaylist(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 34)),
         ]),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          IconButton(tooltip: _isFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة', onPressed: _toggleFavorite, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)),
           IconButton(tooltip: locked ? 'إلغاء قفل اللمس' : 'قفل اللمس', onPressed: () { setState(() => locked = !locked); _hideTimer?.cancel(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); }, style: IconButton.styleFrom(backgroundColor: locked ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(locked ? Icons.lock_rounded : Icons.lock_open_rounded, color: locked ? coral : Colors.white)),
           IconButton(tooltip: _shuffle ? 'العشوائي مفعّل' : 'تشغيل عشوائي', onPressed: _toggleShuffle, style: IconButton.styleFrom(backgroundColor: _shuffle ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.shuffle_rounded, color: _shuffle ? coral : Colors.white)),
         ]),
@@ -1418,15 +1429,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
         child: IgnorePointer(
           child: Center(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-              decoration: BoxDecoration(color: const Color(0xE6101010), borderRadius: BorderRadius.circular(18), border: Border.all(color: coral.withOpacity(.9), width: 1.5)),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Icon(_levelOverlayIcon, color: coral, size: 30),
-                const SizedBox(height: 6),
-                Text(_levelOverlayText!, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              decoration: BoxDecoration(color: const Color(0x55202020), borderRadius: BorderRadius.circular(28), border: Border.all(color: coral.withOpacity(.45), width: 1)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(_levelOverlayIcon, color: coral, size: 23),
+                const SizedBox(width: 9),
+                Text(_levelOverlayText!, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
                 if (_levelOverlayText!.startsWith('السطوع') || _levelOverlayText!.startsWith('الصوت')) ...[
-                  const SizedBox(height: 8),
-                  SizedBox(width: 130, child: LinearProgressIndicator(value: _levelOverlay, backgroundColor: Colors.white24, valueColor: const AlwaysStoppedAnimation<Color>(coral))),
+                  const SizedBox(width: 10),
+                  SizedBox(width: 66, child: ClipRRect(borderRadius: BorderRadius.circular(4), child: LinearProgressIndicator(value: _levelOverlay, minHeight: 4, backgroundColor: Colors.white24, valueColor: const AlwaysStoppedAnimation<Color>(coral)))),
                 ],
               ]),
             ),
