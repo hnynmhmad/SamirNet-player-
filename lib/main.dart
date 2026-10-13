@@ -1401,8 +1401,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: VideoPlayer(controller)))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: VideoPlayer(controller))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
       if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),
       if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
-        Row(children: [IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)), Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))), IconButton(tooltip: 'تشغيل الصوت في الخلفية', onPressed: _startBackgroundAudio, icon: const Icon(Icons.headphones_rounded, color: Colors.white)),
-          IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)), IconButton(onPressed: _toggleFavorite, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)), PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
+        Row(children: [
+          IconButton(onPressed: () => Navigator.pop(context), tooltip: 'رجوع', icon: const Icon(Icons.arrow_back, color: Colors.white)),
+          Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))),
+          IconButton(tooltip: 'تشغيل الصوت في الخلفية', onPressed: _startBackgroundAudio, icon: const Icon(Icons.headphones_rounded, color: Colors.white)),
+          IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)),
+          IconButton(tooltip: locked ? 'إلغاء قفل اللمس' : 'قفل اللمس', onPressed: () { setState(() { locked = !locked; if (!locked) controls = true; }); _hideTimer?.cancel(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); if (!locked) _scheduleHide(); }, icon: Icon(locked ? Icons.lock_rounded : Icons.lock_open_rounded, color: locked ? coral : Colors.white)),
+          PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
           if (value.startsWith('speed:')) { final speed = double.parse(value.substring(6)); controller.setPlaybackSpeed(speed); setState(() => _levelOverlayText = 'السرعة $speed×'); _overlayTimer?.cancel(); _overlayTimer = Timer(const Duration(milliseconds: 1200), () { if (mounted) setState(() => _levelOverlayText = null); }); }
           if (value == 'fit') setState(() => fillScreen = !fillScreen);
           if (value == 'rotate') _toggleFullscreen();
@@ -1421,22 +1426,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ...[0.5, .75, 1.0, 1.25, 1.5, 2.0].map((s) => PopupMenuItem(value: 'speed:$s', child: Text('سرعة $s×'))),
         ])]),
         const Spacer(),
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          IconButton(tooltip: 'الفيديو السابق', onPressed: () => _navigatePlaylist(-1), icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 34)),
-          IconButton(onPressed: () => _seek(-10), icon: const Icon(Icons.replay_10, color: Colors.white, size: 32)),
-          IconButton(onPressed: () => v.isPlaying ? controller.pause() : controller.play(), icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white, size: 64)),
-          IconButton(onPressed: () => _seek(10), icon: const Icon(Icons.forward_10, color: Colors.white, size: 32)),
-          IconButton(tooltip: 'الفيديو التالي', onPressed: () => _navigatePlaylist(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 34)),
-        ]),
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          IconButton(tooltip: _isFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة', onPressed: _toggleFavorite, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)),
-          IconButton(tooltip: locked ? 'إلغاء قفل اللمس' : 'قفل اللمس', onPressed: () { setState(() => locked = !locked); _hideTimer?.cancel(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); }, style: IconButton.styleFrom(backgroundColor: locked ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(locked ? Icons.lock_rounded : Icons.lock_open_rounded, color: locked ? coral : Colors.white)),
-          IconButton(tooltip: _shuffle ? 'العشوائي مفعّل' : 'تشغيل عشوائي', onPressed: _toggleShuffle, style: IconButton.styleFrom(backgroundColor: _shuffle ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.shuffle_rounded, color: _shuffle ? coral : Colors.white)),
-        ]),
         const Spacer(),
-        Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: Column(children: [
+        Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Column(children: [
           VideoProgressIndicator(controller, allowScrubbing: true, colors: const VideoProgressColors(playedColor: coral, bufferedColor: Colors.white38, backgroundColor: Colors.white24)),
-          Row(children: [Text(_time(v.position), style: const TextStyle(color: Colors.white, fontSize: 12)), const Spacer(), Text('-${_time(v.duration - v.position)}', style: const TextStyle(color: Colors.white, fontSize: 12)), IconButton(tooltip: 'ملء الشاشة / احتواء', onPressed: () => setState(() => fillScreen = !fillScreen), icon: Icon(fillScreen ? Icons.fit_screen : Icons.fullscreen, color: Colors.white)), IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)), IconButton(tooltip: _repeat ? 'التكرار مفعّل' : 'تفعيل التكرار', onPressed: _toggleRepeat, style: IconButton.styleFrom(backgroundColor: _repeat ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.repeat_rounded, color: _repeat ? coral : Colors.white))]),
+          Row(children: [
+            Text(_time(v.position), style: const TextStyle(color: Colors.white, fontSize: 12)),
+            const Spacer(),
+            Text('-${_time(v.duration - v.position)}', style: const TextStyle(color: Colors.white, fontSize: 12)),
+            IconButton(tooltip: 'ملء الشاشة / احتواء', onPressed: () => setState(() => fillScreen = !fillScreen), icon: Icon(fillScreen ? Icons.fit_screen : Icons.fullscreen, color: Colors.white)),
+          ]),
+          const SizedBox(height: 2),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              IconButton(tooltip: _repeat ? 'التكرار مفعّل' : 'تفعيل التكرار', onPressed: _toggleRepeat, style: IconButton.styleFrom(backgroundColor: _repeat ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.repeat_rounded, color: _repeat ? coral : Colors.white)),
+              IconButton(tooltip: _shuffle ? 'العشوائي مفعّل' : 'تشغيل عشوائي', onPressed: _toggleShuffle, style: IconButton.styleFrom(backgroundColor: _shuffle ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.shuffle_rounded, color: _shuffle ? coral : Colors.white)),
+            ]),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              IconButton(tooltip: 'الفيديو السابق', onPressed: () => _navigatePlaylist(-1), icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 34)),
+              IconButton(tooltip: 'تشغيل / إيقاف', onPressed: () => v.isPlaying ? controller.pause() : controller.play(), icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white, size: 56)),
+              IconButton(tooltip: 'الفيديو التالي', onPressed: () => _navigatePlaylist(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 34)),
+            ]),
+            IconButton(tooltip: _isFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة', onPressed: _toggleFavorite, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)),
+          ]),
         ])),
       ])))),
       if (_levelOverlayText != null) Positioned.fill(
