@@ -233,7 +233,31 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String videoSort = 'dateDesc';
   String backgroundMode = 'audio';
   @override
-  void initState() { super.initState(); _loadLocal(); _scan(); }
+  void initState() {
+    super.initState();
+    _loadLocal();
+    _scan();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _requestFirstRunPermissions());
+  }
+  Future<void> _requestFirstRunPermissions() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('first_run_notifications_requested') != true) {
+      try {
+        await const MethodChannel('com.samirnet.snplayer/notifications').invokeMethod<bool>('requestPermission');
+      } catch (error) {
+        debugPrint('Notification permission request failed: $error');
+      }
+      await prefs.setBool('first_run_notifications_requested', true);
+    }
+    if (prefs.getBool('first_run_all_files_prompted') != true && Platform.isAndroid) {
+      try {
+        await const MethodChannel('com.samirnet.snplayer/notifications').invokeMethod<bool>('requestAllFilesAccess');
+      } catch (error) {
+        debugPrint('All-files access settings unavailable: $error');
+      }
+      await prefs.setBool('first_run_all_files_prompted', true);
+    }
+  }
   @override
   void dispose() { search.dispose(); super.dispose(); }
   Future<void> _loadLocal() async {
@@ -251,7 +275,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _scan() async {
     if (mounted) setState(() { loading = true; denied = false; scanError = null; });
     try {
-      final permission = await PhotoManager.requestPermissionExtend();
+      final permission = await PhotoManager.requestPermissionExtend(requestOption: const PermissionRequestOption(androidPermission: AndroidPermission(type: RequestType.video, mediaLocation: false)));
       if (!permission.isAuth && !permission.hasAccess) {
         if (mounted) setState(() { denied = true; loading = false; scanError = 'لم يمنح Android التطبيق صلاحية قراءة الفيديوهات. افتح إعدادات التطبيق ثم الأذونات وتأكد من السماح بالصور والفيديوهات.'; });
         return;
@@ -1163,7 +1187,7 @@ class PlayerScreen extends StatefulWidget {
 }
 class _PlayerScreenState extends State<PlayerScreen> {
   late final VideoPlayerController controller;
-  bool ready = false, controls = true, locked = false, fillScreen = false, _longPressActive = false;
+  bool ready = false, controls = true, locked = false, fillScreen = false, _longPressActive = false, _backgroundAudioActive = false;
   bool _isFavorite = false, _repeat = false, _shuffle = false;
   int _playlistIndex = 0;
   Duration _seekStartPosition = Duration.zero;
@@ -1286,7 +1310,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     else { VolumeController().setVolume(level); _showLevelOverlay('الصوت', Icons.volume_up_rounded, level); }
   }
   Future<void> _startBackgroundAudio() async {
-    final wasPlaying = controller.value.isPlaying;
     final resumePosition = controller.value.position;
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1296,18 +1319,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result == true ? 'تم طلب نافذة الفيديو العائمة.' : 'تعذر تشغيل النافذة العائمة؛ تحقق من دعم Picture-in-Picture في Android.')));
         return;
       }
-      // Stop the video decoder/audio output before starting the audio-only player.
-      // Both players use the same file and position, but only one may produce sound.
-      await controller.pause();
+      if (_backgroundAudioActive) {
+        final handler = await _getBackgroundAudioHandler();
+        await handler.stop();
+        await controller.setVolume(1.0);
+        if (mounted) setState(() => _backgroundAudioActive = false);
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم إيقاف صوت الخلفية وإعادة صوت الفيديو.')));
+        return;
+      }
+      // Keep the picture moving, but mute its audio track so the background media
+      // service is the only audible source and can keep playing after the app is hidden.
+      await controller.setVolume(0.0);
+      if (!controller.value.isPlaying) await controller.play();
       await prefs.setInt('resume_${widget.entry.id}', resumePosition.inMilliseconds);
       final handler = await _getBackgroundAudioHandler();
       await handler.customAction('playFileInBackground', {'path': widget.file.path, 'title': 'فيديو · ${widget.entry.name}', 'positionMs': resumePosition.inMilliseconds});
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم نقل صوت الفيديو إلى مشغل الخلفية من الموضع نفسه. سيظهر إشعار التحكم أثناء التشغيل.')));
+      if (mounted) setState(() => _backgroundAudioActive = true);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يستمر الفيديو بصورته، ويظهر إشعار التحكم عند تشغيل الصوت. اضغط الزر مرة أخرى لإيقافه.')));
     } catch (e) {
-      // If background playback fails, restore the visible video instead of leaving it paused.
-      if (wasPlaying && mounted) {
-        try { await controller.play(); } catch (_) {}
-      }
+      try { await controller.setVolume(1.0); } catch (_) {}
+      if (mounted) setState(() => _backgroundAudioActive = false);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الخلفية: $e')));
     }
   }
@@ -1404,7 +1435,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         Row(children: [
           IconButton(onPressed: () => Navigator.pop(context), tooltip: 'رجوع', icon: const Icon(Icons.arrow_back, color: Colors.white)),
           Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))),
-          IconButton(tooltip: 'تشغيل الصوت في الخلفية', onPressed: _startBackgroundAudio, icon: const Icon(Icons.headphones_rounded, color: Colors.white)),
+          IconButton(tooltip: _backgroundAudioActive ? 'إيقاف صوت الخلفية' : 'تشغيل الصوت في الخلفية', onPressed: _startBackgroundAudio, icon: Icon(Icons.headphones_rounded, color: _backgroundAudioActive ? coral : Colors.white)),
           IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)),
           IconButton(tooltip: locked ? 'إلغاء قفل اللمس' : 'قفل اللمس', onPressed: () { setState(() { locked = !locked; if (!locked) controls = true; }); _hideTimer?.cancel(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); if (!locked) _scheduleHide(); }, icon: Icon(locked ? Icons.lock_rounded : Icons.lock_open_rounded, color: locked ? coral : Colors.white)),
           PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
