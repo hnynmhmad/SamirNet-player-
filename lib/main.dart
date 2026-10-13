@@ -220,7 +220,7 @@ class LibraryScreen extends StatefulWidget {
   State<LibraryScreen> createState() => _LibraryScreenState();
 }
 
-class _LibraryScreenState extends State<LibraryScreen> {
+class _LibraryScreenState extends State<LibraryScreen> with WidgetsBindingObserver {
   int tab = 0, filter = 0;
   bool loading = true, denied = false, grid = true, showAllVideos = false;
   String? scanError;
@@ -235,12 +235,29 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadLocal();
     _scan();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _requestFirstRunPermissions());
+  }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _requestFirstRunPermissions();
   }
   Future<void> _requestFirstRunPermissions() async {
+    if (!Platform.isAndroid) return;
     final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('first_run_all_files_prompted') != true) {
+      bool granted = false;
+      try {
+        granted = await const MethodChannel('com.samirnet.snplayer/notifications').invokeMethod<bool>('requestAllFilesAccess') ?? false;
+      } catch (error) {
+        debugPrint('All-files access settings unavailable: $error');
+      }
+      await prefs.setBool('first_run_all_files_prompted', true);
+      // Android opens a separate settings screen for this special permission.
+      // Wait until the user returns before asking for notification permission.
+      if (!granted) return;
+    }
     if (prefs.getBool('first_run_notifications_requested') != true) {
       try {
         await const MethodChannel('com.samirnet.snplayer/notifications').invokeMethod<bool>('requestPermission');
@@ -249,17 +266,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
       }
       await prefs.setBool('first_run_notifications_requested', true);
     }
-    if (prefs.getBool('first_run_all_files_prompted') != true && Platform.isAndroid) {
-      try {
-        await const MethodChannel('com.samirnet.snplayer/notifications').invokeMethod<bool>('requestAllFilesAccess');
-      } catch (error) {
-        debugPrint('All-files access settings unavailable: $error');
-      }
-      await prefs.setBool('first_run_all_files_prompted', true);
-    }
   }
   @override
-  void dispose() { search.dispose(); super.dispose(); }
+  void dispose() { WidgetsBinding.instance.removeObserver(this); search.dispose(); super.dispose(); }
   Future<void> _loadLocal() async {
     final p = await SharedPreferences.getInstance();
     if (!mounted) return;
@@ -287,6 +296,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       debugPrint('SamirNet media scan failed: $error\\n$stack');
       if (mounted) setState(() { loading = false; denied = false; scanError = 'تعذر فحص مكتبة الفيديوهات: $error'; });
     }
+    await _requestFirstRunPermissions();
   }
   List<MediaEntry> get shown {
     Iterable<MediaEntry> list = videos;
