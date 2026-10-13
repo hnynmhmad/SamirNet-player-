@@ -54,7 +54,18 @@ Future<void> main() async {
 
 class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   final AudioPlayer _player = AudioPlayer();
+  Timer? _positionTicker;
   SNBackgroundAudioHandler() {
+    _positionTicker = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      if (_player.playing) {
+        playbackState.add(playbackState.value.copyWith(
+          updatePosition: _player.position,
+          bufferedPosition: _player.bufferedPosition,
+          playing: true,
+          speed: _player.speed,
+        ));
+      }
+    });
     _player.positionStream.listen((position) {
       playbackState.add(playbackState.value.copyWith(
         updatePosition: position,
@@ -135,6 +146,16 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       bufferedPosition: _player.bufferedPosition,
       queueIndex: start,
     ));
+    playbackState.add(playbackState.value.copyWith(
+      controls: const [MediaControl.skipToPrevious, MediaControl.pause, MediaControl.stop, MediaControl.skipToNext],
+      systemActions: const {MediaAction.seek, MediaAction.seekForward, MediaAction.seekBackward},
+      androidCompactActionIndices: const [0, 1, 3],
+      processingState: AudioProcessingState.ready,
+      playing: true,
+      updatePosition: _player.position,
+      bufferedPosition: _player.bufferedPosition,
+      queueIndex: start,
+    ));
     // Do not await play(): just_audio completes this future when playback ends.
     // Awaiting it blocked the caller, leaving the video player audible at the same time.
     unawaited(_player.play());
@@ -149,12 +170,23 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     else { await _player.seek(Duration.zero); }
   }
   @override
-  Future<void> play() => _player.play();
+  Future<void> play() async {
+    await _player.play();
+    playbackState.add(playbackState.value.copyWith(playing: true, updatePosition: _player.position));
+  }
   @override
-  Future<void> pause() => _player.pause();
+  Future<void> pause() async {
+    await _player.pause();
+    playbackState.add(playbackState.value.copyWith(playing: false, updatePosition: _player.position));
+  }
   @override
   Future<void> stop() async {
     await _player.stop();
+    playbackState.add(playbackState.value.copyWith(
+      playing: false,
+      processingState: AudioProcessingState.idle,
+      updatePosition: Duration.zero,
+    ));
     await super.stop();
   }
   @override
