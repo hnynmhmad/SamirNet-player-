@@ -223,6 +223,8 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryScreenState extends State<LibraryScreen> {
   int tab = 0, filter = 0;
   bool loading = true, denied = false, grid = true, showAllVideos = false;
+  Set<String> newMediaIds = {};
+  Set<String> seenFolderPaths = {};
   String? scanError;
   String query = '';
   final search = TextEditingController();
@@ -263,7 +265,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _loadLocal() async {
     final p = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() { favorites = (p.getStringList('favorites') ?? []).toSet(); history = p.getStringList('history') ?? []; backgroundMode = p.getString('background_mode') ?? 'audio'; videoSort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('video_grid') ?? true; foldersGrid = p.getBool('folders_grid') ?? false; });
+    setState(() { favorites = (p.getStringList('favorites') ?? []).toSet(); history = p.getStringList('history') ?? []; backgroundMode = p.getString('background_mode') ?? 'audio'; videoSort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('video_grid') ?? true; foldersGrid = p.getBool('global_media_grid') ?? p.getBool('folders_grid') ?? false; newMediaIds = (p.getStringList('new_media_ids') ?? []).toSet(); seenFolderPaths = (p.getStringList('seen_folder_paths') ?? []).toSet(); });
   }
   Future<void> _openPermissionSettings() async {
     try {
@@ -281,8 +283,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
         return;
       }
       final paths = await PhotoManager.getAssetPathList(type: RequestType.video, onlyAll: true);
-      final assets = paths.isEmpty ? <AssetEntity>[] : await paths.first.getAssetListRange(start: 0, end: 1000);
-      if (mounted) setState(() { videos = assets.map(MediaEntry.new).toList(); loading = false; denied = false; scanError = null; });
+      final assets = <AssetEntity>[];
+      if (paths.isNotEmpty) {
+        final all = paths.first;
+        final total = await all.assetCountAsync;
+        for (var start = 0; start < total; start += 200) {
+          assets.addAll(await all.getAssetListRange(start: start, end: (start + 200).clamp(0, total).toInt()));
+        }
+      }
+      final prefs = await SharedPreferences.getInstance();
+      final previousIds = (prefs.getStringList('known_media_ids') ?? []).toSet();
+      final currentIds = assets.map((asset) => asset.id).toSet();
+      final discovered = previousIds.isEmpty ? <String>{} : currentIds.difference(previousIds);
+      final retainedNew = (prefs.getStringList('new_media_ids') ?? []).toSet().intersection(currentIds);
+      retainedNew.addAll(discovered);
+      await prefs.setStringList('known_media_ids', currentIds.toList());
+      await prefs.setStringList('new_media_ids', retainedNew.toList());
+      if (mounted) setState(() { videos = assets.map(MediaEntry.new).toList(); newMediaIds = retainedNew; loading = false; denied = false; scanError = null; });
     } catch (error, stack) {
       debugPrint('SamirNet media scan failed: $error\\n$stack');
       if (mounted) setState(() { loading = false; denied = false; scanError = 'تعذر فحص مكتبة الفيديوهات: $error'; });
@@ -303,7 +320,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final p = await SharedPreferences.getInstance(); await p.setStringList('favorites', favorites.toList());
   }
   Future<void> _play(MediaEntry v) async {
+    newMediaIds.remove(v.id);
     final p = await SharedPreferences.getInstance();
+    await p.setStringList('new_media_ids', newMediaIds.toList());
     history.remove(v.id); history.insert(0, v.id); history = history.take(100).toList();
     await p.setStringList('history', history);
     if (!mounted) return;
@@ -320,6 +339,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final p = await SharedPreferences.getInstance();
     await p.setBool('video_grid', grid);
     await p.setBool('folders_grid', foldersGrid);
+    await p.setBool('global_media_grid', grid);
     await p.setString('video_sort', videoSort);
   }
   void _toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
@@ -333,6 +353,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         Text('مشغّل الوسائط الخاص بك', style: TextStyle(fontSize: 11, color: Colors.grey)),
       ]),
     ]), actions: [
+      IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () { setState(() { grid = !grid; foldersGrid = grid; }); _saveViewPreferences(); }, icon: Icon(grid ? Icons.view_list_rounded : Icons.grid_view_rounded)),
       IconButton(tooltip: 'تحديث المكتبة', onPressed: _scan, icon: const Icon(Icons.refresh_rounded)),
       PopupMenuButton<String>(tooltip: 'ترتيب الفيديوهات', icon: const Icon(Icons.sort_rounded), onSelected: (v) async { setState(() => videoSort = v); await _saveViewPreferences(); }, itemBuilder: (_) => const [
         PopupMenuItem(value: 'dateDesc', child: Text('الأحدث أولًا')),
@@ -408,10 +429,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
             Positioned(bottom: 7, left: 7, child: Container(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3), decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(6)), child: Text(duration, style: const TextStyle(color: Colors.white, fontSize: 11)))),
             Positioned(top: 2, left: 2, child: IconButton(onPressed: () => _favorite(v), icon: Icon(favorites.contains(v.id) ? Icons.favorite : Icons.favorite_border, color: favorites.contains(v.id) ? coral : Colors.white))),
             const Center(child: Icon(Icons.play_circle_fill, color: Colors.white70, size: 40)),
+            if (newMediaIds.contains(v.id)) Positioned(top: 7, right: 7, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3), decoration: BoxDecoration(color: coral, borderRadius: BorderRadius.circular(5)), child: const Text('NEW', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900))),
           ])),
           Padding(padding: const EdgeInsets.all(10), child: Text(v.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
         ])
-      : ListTile(leading: SizedBox(width: 86, height: 64, child: FutureBuilder<Uint8List?>(future: thumb, builder: (_, s) => s.data == null ? const Icon(Icons.movie) : ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.memory(s.data!, fit: BoxFit.cover)))), title: Text(v.name, maxLines: 2, overflow: TextOverflow.ellipsis), subtitle: Text(duration), trailing: IconButton(onPressed: () => _favorite(v), icon: Icon(favorites.contains(v.id) ? Icons.favorite : Icons.favorite_border, color: coral)))));
+      : ListTile(leading: SizedBox(width: 86, height: 64, child: FutureBuilder<Uint8List?>(future: thumb, builder: (_, s) => s.data == null ? const Icon(Icons.movie) : ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.memory(s.data!, fit: BoxFit.cover)))), title: Text(v.name, maxLines: 2, overflow: TextOverflow.ellipsis), subtitle: Text(newMediaIds.contains(v.id) ? 'NEW · $duration' : duration, style: TextStyle(color: newMediaIds.contains(v.id) ? coral : null, fontWeight: newMediaIds.contains(v.id) ? FontWeight.bold : null)), trailing: IconButton(onPressed: () => _favorite(v), icon: Icon(favorites.contains(v.id) ? Icons.favorite : Icons.favorite_border, color: coral)))));
   }
   Widget _folders() {
     final groups = <String, List<MediaEntry>>{};
@@ -419,7 +441,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       final raw = (v.asset.relativePath ?? '').replaceAll('\\\\', '/').replaceAll(RegExp(r'/+$'), '');
       final parts = raw.split('/').where((part) => part.trim().isNotEmpty).toList();
       final name = parts.isEmpty ? 'المجلد الرئيسي' : parts.last;
-      groups.putIfAbsent(name, () => []).add(v);
+      groups.putIfAbsent(raw.isEmpty ? '__root__' : raw, () => []).add(v);
     }
     final entries = groups.entries.toList();
     return Column(children: [
