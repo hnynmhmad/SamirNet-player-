@@ -674,7 +674,6 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
     final result = <String, List<MediaEntry>>{};
     for (final item in audio) {
       final raw = (item.asset.relativePath ?? '').replaceAll('\\\\', '/').replaceAll(RegExp(r'/+$'), '');
-      final name = parts.isEmpty ? 'المجلد الرئيسي' : parts.last;
       result.putIfAbsent(raw.isEmpty ? '__root__' : raw, () => []).add(item);
     }
     return result;
