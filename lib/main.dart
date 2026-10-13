@@ -33,12 +33,11 @@ Future<AudioHandler> _getBackgroundAudioHandler() {
     }
     return AudioService.init(
       builder: () => SNBackgroundAudioHandler(),
-      config: const AudioServiceConfig(
+      config: AudioServiceConfig(
         androidNotificationChannelId: 'com.samirnet.player.audio',
         androidNotificationChannelName: 'SM Player · موسيقى وفيديو',
         androidNotificationOngoing: true,
         androidStopForegroundOnPause: false,
-        androidNotificationColor: 0xFFEF4444,
         androidNotificationIcon: 'mipmap/ic_launcher',
       ),
     );
@@ -1256,7 +1255,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
           Row(children: [Text(_time(v.position), style: const TextStyle(color: Colors.white, fontSize: 12)), const Spacer(), Text('-${_time(v.duration - v.position)}', style: const TextStyle(color: Colors.white, fontSize: 12)), IconButton(tooltip: 'ملء الشاشة / احتواء', onPressed: () => setState(() => fillScreen = !fillScreen), icon: Icon(fillScreen ? Icons.fit_screen : Icons.fullscreen, color: Colors.white)), IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)), IconButton(tooltip: 'قفل اللمس', onPressed: () { setState(() => locked = true); _hideTimer?.cancel(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); }, icon: const Icon(Icons.lock_open, color: Colors.white))]),
         ])),
       ])))),
-      if (_levelOverlayText != null) Positioned.fill(child: IgnorePointer(child: Center(child: Container(padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16), decoration: BoxDecoration(color: const Color(0xE6101010), borderRadius: BorderRadius.circular(18), border: Border.all(color: coral.withOpacity(.9), width: 1.5)), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(_levelOverlayIcon, color: coral, size: 30), const SizedBox(height: 6), Text(_levelOverlayText!, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)), if (_levelOverlayText!.startsWith('السطوع') || _levelOverlayText!.startsWith('الصوت')) ...[const SizedBox(height: 8), SizedBox(width: 130, child: LinearProgressIndicator(value: _levelOverlay, backgroundColor: Colors.white24, valueColor: const AlwaysStoppedAnimation<Color>(coral)))]])))),
+      if (_levelOverlayText != null) Positioned.fill(
+        child: IgnorePointer(
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+              decoration: BoxDecoration(color: const Color(0xE6101010), borderRadius: BorderRadius.circular(18), border: Border.all(color: coral.withOpacity(.9), width: 1.5)),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(_levelOverlayIcon, color: coral, size: 30),
+                const SizedBox(height: 6),
+                Text(_levelOverlayText!, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+                if (_levelOverlayText!.startsWith('السطوع') || _levelOverlayText!.startsWith('الصوت')) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(width: 130, child: LinearProgressIndicator(value: _levelOverlay, backgroundColor: Colors.white24, valueColor: const AlwaysStoppedAnimation<Color>(coral))),
+                ],
+              ]),
+            ),
+          ),
+        ),
+      ),
       if (locked) Positioned(left: 16, bottom: 32, child: IconButton.filledTonal(onPressed: () { setState(() { locked = false; controls = true; }); SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); }, icon: const Icon(Icons.lock))),
     ]))));
   }
