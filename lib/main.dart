@@ -53,6 +53,14 @@ Future<void> main() async {
 class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   final AudioPlayer _player = AudioPlayer();
   SNBackgroundAudioHandler() {
+    _player.positionStream.listen((position) {
+      playbackState.add(playbackState.value.copyWith(
+        updatePosition: position,
+        bufferedPosition: _player.bufferedPosition,
+        playing: _player.playing,
+        speed: _player.speed,
+      ));
+    });
     _player.playbackEventStream.listen((event) {
       final playing = _player.playing;
       playbackState.add(playbackState.value.copyWith(
