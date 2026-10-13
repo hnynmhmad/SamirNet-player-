@@ -36,8 +36,10 @@ Future<AudioHandler> _getBackgroundAudioHandler() {
       config: AudioServiceConfig(
         androidNotificationChannelId: 'com.samirnet.player.audio',
         androidNotificationChannelName: 'SM Player · موسيقى وفيديو',
+        androidNotificationChannelDescription: 'إشعار التحكم بتشغيل الموسيقى والفيديو في الخلفية',
         androidNotificationOngoing: true,
         androidStopForegroundOnPause: false,
+        androidNotificationClickStartsActivity: true,
         androidNotificationIcon: 'mipmap/ic_launcher',
       ),
     );
@@ -111,6 +113,28 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       initialIndex: start,
     );
     if (startPosition > Duration.zero) await _player.seek(startPosition, index: start);
+    // Publish duration only after the source is prepared. The duration stream may
+    // emit before mediaItem is set, which previously left the UI and media session
+    // with a zero/unknown duration and a seek bar stuck at the start.
+    final preparedDuration = _player.duration;
+    if (preparedDuration != null) {
+      mediaItem.add(items[start].copyWith(duration: preparedDuration));
+    }
+    playbackState.add(playbackState.value.copyWith(
+      controls: const [
+        MediaControl.skipToPrevious,
+        MediaControl.pause,
+        MediaControl.stop,
+        MediaControl.skipToNext,
+      ],
+      systemActions: const {MediaAction.seek, MediaAction.seekForward, MediaAction.seekBackward},
+      androidCompactActionIndices: const [0, 1, 3],
+      processingState: AudioProcessingState.ready,
+      playing: false,
+      updatePosition: _player.position,
+      bufferedPosition: _player.bufferedPosition,
+      queueIndex: start,
+    ));
     // Do not await play(): just_audio completes this future when playback ends.
     // Awaiting it blocked the caller, leaving the video player audible at the same time.
     unawaited(_player.play());
