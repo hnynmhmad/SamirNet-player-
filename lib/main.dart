@@ -51,7 +51,8 @@ Future<void> main() async {
 }
 
 class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
-  final AudioPlayer _player = AudioPlayer();
+  final AndroidEqualizer _equalizer = AndroidEqualizer();
+  late final AudioPlayer _player = AudioPlayer(audioPipeline: AudioPipeline(androidAudioEffects: [_equalizer]));
   SNBackgroundAudioHandler() {
     _player.playbackEventStream.listen((event) {
       final playing = _player.playing;
@@ -140,6 +141,19 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       await _player.setLoopMode(value == 'one' ? LoopMode.one : value == 'all' ? LoopMode.all : LoopMode.off);
     } else if (name == 'setShuffle') {
       await _player.setShuffleModeEnabled(extras?['enabled'] == true);
+    } else if (name == 'getEqualizerParameters') {
+      final p = await _equalizer.parameters;
+      return <String, dynamic>{'minDecibels': p.minDecibels, 'maxDecibels': p.maxDecibels, 'enabled': _equalizer.enabled, 'bands': [for (final b in p.bands) <String, dynamic>{'centerFrequency': b.centerFrequency, 'gain': b.gain}]};
+    } else if (name == 'setEqualizerEnabled') {
+      await _equalizer.setEnabled(extras?['enabled'] == true);
+    } else if (name == 'setEqualizerBandGain') {
+      final i = extras?['index'] as int? ?? -1;
+      final g = (extras?['gain'] as num?)?.toDouble();
+      final p = await _equalizer.parameters;
+      if (i >= 0 && i < p.bands.length && g != null) await p.bands[i].setGain(g);
+    } else if (name == 'setMusicSpeed') {
+      final v = ((extras?['speed'] as num?)?.toDouble() ?? 1.0).clamp(0.5, 2.0).toDouble();
+      await _player.setSpeed(v);
     }
     return null;
   }
