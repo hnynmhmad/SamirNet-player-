@@ -1352,6 +1352,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الخلفية: $e')));
     }
   }
+  Future<void> _toggleVideoPlayback() async {
+    // The background AudioPlayer is a separate player. Always stop it when the
+    // user pauses the video, otherwise its audio can continue after the picture stops.
+    if (controller.value.isPlaying) {
+      if (_backgroundAudioActive) {
+        try {
+          final handler = await _getBackgroundAudioHandler();
+          await handler.stop();
+        } catch (error) {
+          debugPrint('Could not stop background audio with video pause: $error');
+        }
+        try { await controller.setVolume(1.0); } catch (_) {}
+        if (mounted) setState(() => _backgroundAudioActive = false);
+      }
+      await controller.pause();
+    } else {
+      await controller.play();
+    }
+  }
+  Future<void> _stopBackgroundAudio({bool restoreVideoVolume = true}) async {
+    if (!_backgroundAudioActive) return;
+    try {
+      final handler = await _getBackgroundAudioHandler();
+      await handler.stop();
+    } catch (error) {
+      debugPrint('Could not stop background audio: $error');
+    }
+    if (restoreVideoVolume) {
+      try { await controller.setVolume(1.0); } catch (_) {}
+    }
+    if (mounted) setState(() => _backgroundAudioActive = false);
+  }
   Future<void> _toggleFullscreen() async {
     final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
     await SystemChrome.setPreferredOrientations(landscape ? [DeviceOrientation.portraitUp] : [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
@@ -1399,6 +1431,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _hideTimer?.cancel();
     _overlayTimer?.cancel();
+    // Do not leave a second audio player running when the video page is closed.
+    if (_backgroundAudioActive) {
+      _getBackgroundAudioHandler().then((handler) => handler.stop()).catchError((Object error) {
+        debugPrint('Could not stop background audio while leaving player: $error');
+      });
+    }
     controller.removeListener(_update);
     controller.dispose();
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
@@ -1484,7 +1522,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ]),
             Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(tooltip: 'الفيديو السابق', onPressed: () => _navigatePlaylist(-1), icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 34)),
-              IconButton(tooltip: 'تشغيل / إيقاف', onPressed: () => v.isPlaying ? controller.pause() : controller.play(), icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white, size: 56)),
+              IconButton(tooltip: 'تشغيل / إيقاف', onPressed: _toggleVideoPlayback, icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white, size: 56)),
               IconButton(tooltip: 'الفيديو التالي', onPressed: () => _navigatePlaylist(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 34)),
             ]),
             IconButton(tooltip: _isFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة', onPressed: _toggleFavorite, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)),
