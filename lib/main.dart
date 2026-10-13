@@ -1233,6 +1233,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _overlayTimer;
   Timer? _hideTimer;
   DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
+  bool? _lastVideoPlaying;
+  DateTime _lastBackgroundSync = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _syncingBackgroundAudio = false;
   @override
   void initState() {
     super.initState();
@@ -1261,6 +1264,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
   void _update() {
     if (!mounted) return;
+    if (_backgroundAudioActive && !_syncingBackgroundAudio && controller.value.isInitialized) {
+      final playing = controller.value.isPlaying;
+      if (_lastVideoPlaying != playing) {
+        _lastVideoPlaying = playing;
+        _syncingBackgroundAudio = true;
+        _getBackgroundAudioHandler().then((handler) async {
+          if (playing) {
+            await handler.seek(controller.value.position);
+            await handler.play();
+          } else {
+            await handler.pause();
+          }
+        }).catchError((Object error) {
+          debugPrint('Background playback synchronization failed: $error');
+        }).whenComplete(() { _syncingBackgroundAudio = false; });
+      } else if (playing && DateTime.now().difference(_lastBackgroundSync).inSeconds >= 2) {
+        _lastBackgroundSync = DateTime.now();
+        _syncingBackgroundAudio = true;
+        _getBackgroundAudioHandler().then((handler) async {
+          final delta = (handler.playbackState.value.updatePosition - controller.value.position).inMilliseconds.abs();
+          if (delta > 1500) await handler.seek(controller.value.position);
+        }).catchError((Object error) {
+          debugPrint('Background position synchronization failed: $error');
+        }).whenComplete(() { _syncingBackgroundAudio = false; });
+      }
+    }
     if (controller.value.isInitialized && DateTime.now().difference(_lastSaved).inSeconds >= 5) {
       _lastSaved = DateTime.now();
       SharedPreferences.getInstance().then((p) => p.setInt('resume_${widget.entry.id}', controller.value.position.inMilliseconds));
@@ -1353,7 +1382,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         final handler = await _getBackgroundAudioHandler();
         await handler.stop();
         await controller.setVolume(1.0);
-        if (mounted) setState(() => _backgroundAudioActive = false);
+        if (mounted) setState(() { _backgroundAudioActive = false; _lastVideoPlaying = null; });
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم إيقاف صوت الخلفية وإعادة صوت الفيديو.')));
         return;
       }
@@ -1364,7 +1393,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       await prefs.setInt('resume_${widget.entry.id}', resumePosition.inMilliseconds);
       final handler = await _getBackgroundAudioHandler();
       await handler.customAction('playFileInBackground', {'path': widget.file.path, 'title': 'فيديو · ${widget.entry.name}', 'positionMs': resumePosition.inMilliseconds});
-      if (mounted) setState(() => _backgroundAudioActive = true);
+      if (mounted) setState(() { _backgroundAudioActive = true; _lastVideoPlaying = controller.value.isPlaying; _lastBackgroundSync = DateTime.now(); });
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يستمر الفيديو بصورته، ويظهر إشعار التحكم عند تشغيل الصوت. اضغط الزر مرة أخرى لإيقافه.')));
     } catch (e) {
       try { await controller.setVolume(1.0); } catch (_) {}
