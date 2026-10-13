@@ -1252,6 +1252,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double _levelOverlay = .5;
   Timer? _overlayTimer;
   Timer? _hideTimer;
+  StreamSubscription<PlaybackState>? _backgroundPlaybackSub;
   DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
   bool? _lastVideoPlaying;
   DateTime _lastBackgroundSync = DateTime.fromMillisecondsSinceEpoch(0);
@@ -1399,6 +1400,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         return;
       }
       if (_backgroundAudioActive) {
+        await _backgroundPlaybackSub?.cancel();
+        _backgroundPlaybackSub = null;
         final handler = await _getBackgroundAudioHandler();
         await handler.stop();
         await controller.setVolume(1.0);
@@ -1414,6 +1417,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final handler = await _getBackgroundAudioHandler();
       await handler.customAction('playFileInBackground', {'path': widget.file.path, 'title': 'فيديو · ${widget.entry.name}', 'positionMs': resumePosition.inMilliseconds});
       if (mounted) setState(() { _backgroundAudioActive = true; _lastVideoPlaying = controller.value.isPlaying; _lastBackgroundSync = DateTime.now(); });
+      await _backgroundPlaybackSub?.cancel();
+      _backgroundPlaybackSub = handler.playbackState.listen((state) async {
+        if (!_backgroundAudioActive || !mounted || !controller.value.isInitialized) return;
+        if (state.playing && !controller.value.isPlaying) {
+          await controller.play();
+        } else if (!state.playing && controller.value.isPlaying) {
+          await controller.pause();
+        }
+      });
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يستمر الفيديو بصورته، ويظهر إشعار التحكم عند تشغيل الصوت. اضغط الزر مرة أخرى لإيقافه.')));
     } catch (e) {
       try { await controller.setVolume(1.0); } catch (_) {}
@@ -1468,6 +1480,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _hideTimer?.cancel();
     _overlayTimer?.cancel();
+    _backgroundPlaybackSub?.cancel();
     controller.removeListener(_update);
     controller.dispose();
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
