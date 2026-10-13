@@ -456,7 +456,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     for (final v in videos) {
       final raw = (v.asset.relativePath ?? '').replaceAll('\\\\', '/').replaceAll(RegExp(r'/+$'), '');
       final parts = raw.split('/').where((part) => part.trim().isNotEmpty).toList();
-      final name = parts.isEmpty ? 'المجلد الرئيسي' : parts.last;
       groups.putIfAbsent(raw.isEmpty ? '__root__' : raw, () => []).add(v);
     }
     final entries = groups.entries.toList();
