@@ -1162,7 +1162,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final speed = _speedForLongPress(details.localPosition, MediaQuery.sizeOf(context));
     await controller.setPlaybackSpeed(speed);
     _showLevelOverlay('السرعة', Icons.speed_rounded, (speed / 2).clamp(0.0, 1.0));
-    if (mounted) { setState(() {}); _levelOverlayText = 'السرعة ${speed}×'; }
+    if (mounted) { setState(() {}); _levelOverlayText = 'السرعة $speed×'; }
     _showControls();
   }
   Future<void> _endSpeedBoost() async {
