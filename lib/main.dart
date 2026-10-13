@@ -704,6 +704,156 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
   }
 }
 
+class AudioStudioScreen extends StatefulWidget {
+  const AudioStudioScreen({required this.handler, super.key});
+  final AudioHandler handler;
+  @override
+  State<AudioStudioScreen> createState() => _AudioStudioScreenState();
+}
+
+class _AudioStudioScreenState extends State<AudioStudioScreen> {
+  bool loading = true;
+  bool enabled = false;
+  String? error;
+  double minDb = -15, maxDb = 15, speed = 1;
+  List<double> gains = [];
+  List<double> frequencies = [];
+
+  @override
+  void initState() {
+    super.initState();
+    speed = widget.handler.playbackState.value.speed.clamp(.5, 2.0).toDouble();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = await widget.handler.customAction('getEqualizerParameters') as Map?;
+      if (raw == null) throw StateError('لم تصل إعدادات المعادل');
+      final bands = (raw['bands'] as List? ?? const []).cast<Map>();
+      minDb = (raw['minDecibels'] as num?)?.toDouble() ?? -15;
+      maxDb = (raw['maxDecibels'] as num?)?.toDouble() ?? 15;
+      frequencies = bands.map((b) => (b['centerFrequency'] as num).toDouble()).toList();
+      final saved = prefs.getStringList('music_eq_gains_v1') ?? [];
+      gains = List<double>.generate(bands.length, (i) => i < saved.length
+          ? (double.tryParse(saved[i]) ?? (bands[i]['gain'] as num).toDouble()).clamp(minDb, maxDb).toDouble()
+          : (bands[i]['gain'] as num).toDouble());
+      enabled = prefs.getBool('music_eq_enabled_v1') ?? false;
+      speed = (prefs.getDouble('music_speed_v1') ?? speed).clamp(.5, 2.0).toDouble();
+      await widget.handler.customAction('setEqualizerEnabled', {'enabled': enabled});
+      for (var i = 0; i < saved.length && i < gains.length; i++) {
+        await widget.handler.customAction('setEqualizerBandGain', {'index': i, 'gain': gains[i]});
+      }
+      await widget.handler.customAction('setMusicSpeed', {'speed': speed});
+      if (mounted) setState(() => loading = false);
+    } catch (e) {
+      if (mounted) setState(() { loading = false; error = 'تعذر تشغيل المعادل على هذا الجهاز: $e'; });
+    }
+  }
+
+  Future<void> _toggle(bool value) async {
+    await widget.handler.customAction('setEqualizerEnabled', {'enabled': value});
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('music_eq_enabled_v1', value);
+    if (mounted) setState(() => enabled = value);
+  }
+
+  Future<void> _gain(int index, double value) async {
+    setState(() => gains[index] = value);
+    await widget.handler.customAction('setEqualizerBandGain', {'index': index, 'gain': value});
+    final p = await SharedPreferences.getInstance();
+    await p.setStringList('music_eq_gains_v1', gains.map((v) => v.toString()).toList());
+  }
+
+  Future<void> _preset(String mode) async {
+    final values = frequencies.map((hz) {
+      if (mode == 'bass') return hz < 250 ? 5.0 : hz >= 4000 ? 2.0 : 0.0;
+      if (mode == 'soft') return hz < 250 ? 1.5 : hz >= 4000 ? -2.0 : -1.0;
+      if (mode == 'clear') return hz < 250 ? -1.0 : hz >= 4000 ? 4.0 : 2.0;
+      return 0.0;
+    }).map((v) => v.clamp(minDb, maxDb).toDouble()).toList();
+    for (var i = 0; i < values.length; i++) {
+      await widget.handler.customAction('setEqualizerBandGain', {'index': i, 'gain': values[i]});
+    }
+    final p = await SharedPreferences.getInstance();
+    await p.setStringList('music_eq_gains_v1', values.map((v) => v.toString()).toList());
+    if (mounted) setState(() => gains = values);
+  }
+
+  Future<void> _speed(double value) async {
+    setState(() => speed = value);
+    final p = await SharedPreferences.getInstance();
+    await p.setDouble('music_speed_v1', value);
+    await widget.handler.customAction('setMusicSpeed', {'speed': value});
+  }
+
+  @override
+  Widget build(BuildContext context) => Directionality(
+    textDirection: TextDirection.rtl,
+    child: Scaffold(
+      backgroundColor: const Color(0xFF090909),
+      appBar: AppBar(backgroundColor: const Color(0xFF090909), foregroundColor: Colors.white, title: const Text('استوديو الصوت')),
+      body: loading ? const Center(child: CircularProgressIndicator(color: coral))
+        : error != null ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white))))
+        : ListView(padding: const EdgeInsets.all(16), children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: const Color(0xFF191919), borderRadius: BorderRadius.circular(20), border: Border.all(color: coral.withOpacity(.5))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Row(children: [Icon(Icons.graphic_eq, color: coral, size: 30), SizedBox(width: 10), Text('المعادل الصوتي', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold))]),
+              const SizedBox(height: 6),
+              const Text('تحكم بالجهير والنعومة والوضوح للموسيقى.', style: TextStyle(color: Colors.white70)),
+              SwitchListTile(contentPadding: EdgeInsets.zero, activeColor: coral, title: const Text('تفعيل المعادل', style: TextStyle(color: Colors.white)), value: enabled, onChanged: _toggle),
+              const Divider(color: Colors.white12),
+              const Text('أنماط سريعة', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              Wrap(spacing: 6, children: [
+                _presetButton('متوازن', 'flat'),
+                _presetButton('جهير قوي', 'bass'),
+                _presetButton('ناعم', 'soft'),
+                _presetButton('أوضح', 'clear'),
+              ]),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: const Color(0xFF191919), borderRadius: BorderRadius.circular(20)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('الترددات يدويًا', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              Text('من ${minDb.toStringAsFixed(0)} إلى ${maxDb.toStringAsFixed(0)} dB', style: const TextStyle(color: Colors.white60)),
+              for (var i = 0; i < gains.length; i++) ...[
+                Row(children: [
+                  Expanded(child: Text(frequencies[i] >= 1000 ? '${(frequencies[i] / 1000).toStringAsFixed(1)} kHz' : '${frequencies[i].round()} Hz', style: const TextStyle(color: Colors.white))),
+                  Text('${gains[i].toStringAsFixed(1)} dB', style: const TextStyle(color: coral)),
+                ]),
+                Slider(min: minDb, max: maxDb, value: gains[i].clamp(minDb, maxDb).toDouble(), activeColor: coral, onChanged: enabled ? (v) => _gain(i, v) : null),
+              ],
+            ]),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: const Color(0xFF191919), borderRadius: BorderRadius.circular(20)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('سرعة الموسيقى', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              Text('${speed.toStringAsFixed(2)}×', style: const TextStyle(color: coral, fontSize: 28, fontWeight: FontWeight.bold)),
+              Slider(min: .5, max: 2, divisions: 15, value: speed, activeColor: coral, onChanged: _speed),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          const Text('هذه الإعدادات للموسيقى فقط؛ الفيديو لا يتأثر بها.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white60)),
+        ]),
+    ),
+  );
+
+  Widget _presetButton(String label, String value) => OutlinedButton(
+    onPressed: () => _preset(value),
+    style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: BorderSide(color: value == 'flat' ? coral : Colors.white24)),
+    child: Text(label),
+  );
+}
+
 class MusicPlayerScreen extends StatefulWidget {
   const MusicPlayerScreen({required this.files, required this.titles, required this.initialIndex, required this.handler, super.key});
   final List<File> files;
@@ -853,6 +1003,7 @@ class _MusicPlayerScreenState extends State<MusicPlayerScreen> with SingleTicker
         IconButton(tooltip: 'قائمة الانتظار', onPressed: _showQueue, icon: const Icon(Icons.queue_music_rounded)),
         IconButton(tooltip: 'قوائم التشغيل المحفوظة', onPressed: _showSavedPlaylists, icon: const Icon(Icons.library_music_rounded)),
         IconButton(tooltip: 'حفظ قائمة التشغيل', onPressed: _savePlaylist, icon: const Icon(Icons.playlist_add_rounded)),
+        IconButton(tooltip: 'استوديو الصوت', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => AudioStudioScreen(handler: widget.handler))), icon: const Icon(Icons.equalizer_rounded, color: coral)),
       ],
     ),
     body: StreamBuilder<PlaybackState>(
