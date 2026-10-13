@@ -264,6 +264,49 @@ jobs:
           manifest_path.write_text(manifest)
           print(f'Verified MainActivity package and Picture-in-Picture support: {expected} ({activity})')
           PY
+      - name: Configure Android media playback notification service
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('android/app/src/main/AndroidManifest.xml')
+          manifest = path.read_text()
+          permissions = [
+              'android.permission.WAKE_LOCK',
+              'android.permission.FOREGROUND_SERVICE',
+              'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
+              'android.permission.POST_NOTIFICATIONS',
+          ]
+          for permission in permissions:
+              tag = f'<uses-permission android:name="{permission}"/>'
+              if permission not in manifest:
+                  manifest = manifest.replace('<application', tag + '\\n    <application', 1)
+          service = '''    <service
+                  android:name="com.ryanheise.audioservice.AudioService"
+                  android:foregroundServiceType="mediaPlayback"
+                  android:exported="true"
+                  android:stopWithTask="false">
+                  <intent-filter>
+                      <action android:name="android.media.browse.MediaBrowserService" />
+                  </intent-filter>
+              </service>
+              <receiver
+                  android:name="com.ryanheise.audioservice.MediaButtonReceiver"
+                  android:exported="true">
+                  <intent-filter>
+                      <action android:name="android.intent.action.MEDIA_BUTTON" />
+                  </intent-filter>
+              </receiver>
+          '''
+          if 'com.ryanheise.audioservice.AudioService' not in manifest:
+              manifest = manifest.replace('</application>', service + '    </application>', 1)
+          if 'com.ryanheise.audioservice.AudioService' not in manifest or 'com.ryanheise.audioservice.MediaButtonReceiver' not in manifest:
+              raise SystemExit('Failed to configure audio_service media notification components')
+          path.write_text(manifest)
+          print('Configured foreground media playback service, media buttons, and Android notification permissions.')
+          PY
       - name: Set Android app compile SDK to 36
         shell: bash
         run: |
