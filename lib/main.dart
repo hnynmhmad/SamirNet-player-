@@ -54,9 +54,8 @@ Future<void> main() async {
 
 class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   final AudioPlayer _player = AudioPlayer();
-  Timer? _positionTicker;
   SNBackgroundAudioHandler() {
-    _positionTicker = Timer.periodic(const Duration(milliseconds: 250), (_) {
+    Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (_player.playing) {
         playbackState.add(playbackState.value.copyWith(
           updatePosition: _player.position,
