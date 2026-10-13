@@ -51,8 +51,7 @@ Future<void> main() async {
 }
 
 class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
-  final AndroidEqualizer _equalizer = AndroidEqualizer();
-  late final AudioPlayer _player = AudioPlayer(audioPipeline: AudioPipeline(androidAudioEffects: [_equalizer]));
+  final AudioPlayer _player = AudioPlayer();
   SNBackgroundAudioHandler() {
     _player.playbackEventStream.listen((event) {
       final playing = _player.playing;
@@ -142,15 +141,9 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     } else if (name == 'setShuffle') {
       await _player.setShuffleModeEnabled(extras?['enabled'] == true);
     } else if (name == 'getEqualizerParameters') {
-      final p = await _equalizer.parameters;
-      return <String, dynamic>{'minDecibels': p.minDecibels, 'maxDecibels': p.maxDecibels, 'enabled': _equalizer.enabled, 'bands': [for (final b in p.bands) <String, dynamic>{'centerFrequency': b.centerFrequency, 'gain': b.gain}]};
-    } else if (name == 'setEqualizerEnabled') {
-      await _equalizer.setEnabled(extras?['enabled'] == true);
-    } else if (name == 'setEqualizerBandGain') {
-      final i = extras?['index'] as int? ?? -1;
-      final g = (extras?['gain'] as num?)?.toDouble();
-      final p = await _equalizer.parameters;
-      if (i >= 0 && i < p.bands.length && g != null) await p.bands[i].setGain(g);
+      throw UnsupportedError('المعادل الصوتي غير متاح على هذا الجهاز؛ تم تعطيله لتجنب تعطل تشغيل الموسيقى.');
+    } else if (name == 'setEqualizerEnabled' || name == 'setEqualizerBandGain') {
+      throw UnsupportedError('المعادل الصوتي غير متاح على هذا الجهاز.');
     } else if (name == 'setMusicSpeed') {
       final v = ((extras?['speed'] as num?)?.toDouble() ?? 1.0).clamp(0.5, 2.0).toDouble();
       await _player.setSpeed(v);
@@ -166,14 +159,14 @@ class SamirNetApp extends StatefulWidget {
 }
 
 class _SamirNetAppState extends State<SamirNetApp> {
-  ThemeMode mode = ThemeMode.system;
+  ThemeMode mode = ThemeMode.light;
   @override
   void initState() { super.initState(); _load(); }
   Future<void> _load() async {
     final p = await SharedPreferences.getInstance();
-    final v = p.getString('theme') ?? 'system';
+    final v = p.getString('theme') ?? 'light';
     if (!mounted) return;
-    setState(() => mode = v == 'dark' ? ThemeMode.dark : v == 'light' ? ThemeMode.light : ThemeMode.system);
+    setState(() => mode = v == 'dark' ? ThemeMode.dark : ThemeMode.light);
   }
   Future<void> _setMode(ThemeMode value) async {
     final p = await SharedPreferences.getInstance();
@@ -1384,7 +1377,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: VideoPlayer(controller)))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: VideoPlayer(controller))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
       if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),
       if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
-        Row(children: [IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)), Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))), IconButton(tooltip: 'تشغيل الصوت في الخلفية', onPressed: _startBackgroundAudio, icon: const Icon(Icons.headphones_rounded, color: Colors.white)), IconButton(onPressed: _toggleFavorite, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)), PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
+        Row(children: [IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)), Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))), IconButton(tooltip: 'تشغيل الصوت في الخلفية', onPressed: _startBackgroundAudio, icon: const Icon(Icons.headphones_rounded, color: Colors.white)),
+          IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)), IconButton(onPressed: _toggleFavorite, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)), PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
           if (value.startsWith('speed:')) { final speed = double.parse(value.substring(6)); controller.setPlaybackSpeed(speed); setState(() => _levelOverlayText = 'السرعة $speed×'); _overlayTimer?.cancel(); _overlayTimer = Timer(const Duration(milliseconds: 1200), () { if (mounted) setState(() => _levelOverlayText = null); }); }
           if (value == 'fit') setState(() => fillScreen = !fillScreen);
           if (value == 'rotate') _toggleFullscreen();
@@ -1411,13 +1405,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
           IconButton(tooltip: 'الفيديو التالي', onPressed: () => _navigatePlaylist(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 34)),
         ]),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          IconButton(tooltip: _repeat ? 'التكرار مفعّل' : 'تفعيل التكرار', onPressed: _toggleRepeat, style: IconButton.styleFrom(backgroundColor: _repeat ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.repeat_rounded, color: _repeat ? coral : Colors.white)),
+          IconButton(tooltip: locked ? 'إلغاء قفل اللمس' : 'قفل اللمس', onPressed: () { setState(() => locked = !locked); _hideTimer?.cancel(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); }, style: IconButton.styleFrom(backgroundColor: locked ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(locked ? Icons.lock_rounded : Icons.lock_open_rounded, color: locked ? coral : Colors.white)),
           IconButton(tooltip: _shuffle ? 'العشوائي مفعّل' : 'تشغيل عشوائي', onPressed: _toggleShuffle, style: IconButton.styleFrom(backgroundColor: _shuffle ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.shuffle_rounded, color: _shuffle ? coral : Colors.white)),
         ]),
         const Spacer(),
         Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: Column(children: [
           VideoProgressIndicator(controller, allowScrubbing: true, colors: const VideoProgressColors(playedColor: coral, bufferedColor: Colors.white38, backgroundColor: Colors.white24)),
-          Row(children: [Text(_time(v.position), style: const TextStyle(color: Colors.white, fontSize: 12)), const Spacer(), Text('-${_time(v.duration - v.position)}', style: const TextStyle(color: Colors.white, fontSize: 12)), IconButton(tooltip: 'ملء الشاشة / احتواء', onPressed: () => setState(() => fillScreen = !fillScreen), icon: Icon(fillScreen ? Icons.fit_screen : Icons.fullscreen, color: Colors.white)), IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)), IconButton(tooltip: 'قفل اللمس', onPressed: () { setState(() => locked = true); _hideTimer?.cancel(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); }, icon: const Icon(Icons.lock_open, color: Colors.white))]),
+          Row(children: [Text(_time(v.position), style: const TextStyle(color: Colors.white, fontSize: 12)), const Spacer(), Text('-${_time(v.duration - v.position)}', style: const TextStyle(color: Colors.white, fontSize: 12)), IconButton(tooltip: 'ملء الشاشة / احتواء', onPressed: () => setState(() => fillScreen = !fillScreen), icon: Icon(fillScreen ? Icons.fit_screen : Icons.fullscreen, color: Colors.white)), IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)), IconButton(tooltip: _repeat ? 'التكرار مفعّل' : 'تفعيل التكرار', onPressed: _toggleRepeat, style: IconButton.styleFrom(backgroundColor: _repeat ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.repeat_rounded, color: _repeat ? coral : Colors.white))]),
         ])),
       ])))),
       if (_levelOverlayText != null) Positioned.fill(
