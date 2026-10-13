@@ -24,17 +24,25 @@ const ink = Color(0xFF111827);
 Future<AudioHandler>? _backgroundAudioHandlerFuture;
 
 Future<AudioHandler> _getBackgroundAudioHandler() {
-  return _backgroundAudioHandlerFuture ??= AudioService.init(
-    builder: () => SNBackgroundAudioHandler(),
-    config: const AudioServiceConfig(
-      androidNotificationChannelId: 'com.samirnet.player.audio',
-      androidNotificationChannelName: 'SM Player · موسيقى وفيديو',
-      androidNotificationOngoing: true,
-      androidStopForegroundOnPause: false,
-      androidNotificationColor: 0xFFEF4444,
-      androidNotificationIcon: 'mipmap/ic_launcher',
-    ),
-  );
+  return _backgroundAudioHandlerFuture ??= (() async {
+    // Android 13+ may hide media notifications until notification permission is requested.
+    try {
+      await const MethodChannel('com.samirnet.snplayer/notifications').invokeMethod<bool>('requestPermission');
+    } catch (error) {
+      debugPrint('Notification permission request was unavailable: $error');
+    }
+    return AudioService.init(
+      builder: () => SNBackgroundAudioHandler(),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.samirnet.player.audio',
+        androidNotificationChannelName: 'SM Player · موسيقى وفيديو',
+        androidNotificationOngoing: true,
+        androidStopForegroundOnPause: false,
+        androidNotificationColor: 0xFFEF4444,
+        androidNotificationIcon: 'mipmap/ic_launcher',
+      ),
+    );
+  })();
 }
 
 Future<void> main() async {
@@ -56,7 +64,7 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
           MediaControl.skipToNext,
         ],
         systemActions: const {MediaAction.seek},
-        androidCompactActionIndices: const [0, 1, 2],
+        androidCompactActionIndices: const [0, 1, 3],
         processingState: const {
           ProcessingState.idle: AudioProcessingState.idle,
           ProcessingState.loading: AudioProcessingState.loading,
@@ -1016,6 +1024,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await controller.seekTo(Duration(milliseconds: resume));
       }
       if (mounted) setState(() => ready = true);
+      final modePrefs = await SharedPreferences.getInstance();
+      await controller.setLooping(modePrefs.getBool('video_repeat_v1') ?? false);
       await controller.play();
       _scheduleHide();
     }).catchError((Object error) {
