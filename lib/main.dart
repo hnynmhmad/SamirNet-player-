@@ -28,9 +28,11 @@ Future<AudioHandler> _getBackgroundAudioHandler() {
     builder: () => SNBackgroundAudioHandler(),
     config: const AudioServiceConfig(
       androidNotificationChannelId: 'com.samirnet.player.audio',
-      androidNotificationChannelName: 'SM Player playback',
+      androidNotificationChannelName: 'SM Player · موسيقى وفيديو',
       androidNotificationOngoing: true,
-      androidStopForegroundOnPause: true,
+      androidStopForegroundOnPause: false,
+      androidNotificationColor: 0xFFEF4444,
+      androidNotificationIcon: 'mipmap/ic_launcher',
     ),
   );
 }
@@ -700,12 +702,36 @@ class _MusicPlayerScreenState extends State<MusicPlayerScreen> with SingleTicker
   void initState() {
     super.initState();
     _discController = AnimationController(vsync: this, duration: const Duration(seconds: 12));
+    _loadPlaybackPreferences();
     _mediaSub = widget.handler.mediaItem.listen((_) { if (mounted) setState(() {}); });
     _playbackSub = widget.handler.playbackState.listen((state) {
       if (state.playing && !_discController.isAnimating) { _discController.repeat(); }
       else if (!state.playing && _discController.isAnimating) { _discController.stop(); }
     });
     if (widget.handler.playbackState.value.playing) { _discController.repeat(); }
+  }
+  Future<void> _loadPlaybackPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final shuffle = prefs.getBool('music_shuffle_v1') ?? false;
+    final repeat = prefs.getBool('music_repeat_v1') ?? false;
+    if (!mounted) return;
+    setState(() { _shuffle = shuffle; _repeat = repeat; });
+    await widget.handler.customAction('setShuffle', {'enabled': shuffle});
+    await widget.handler.customAction('setLoopMode', {'value': repeat ? 'all' : 'off'});
+  }
+  Future<void> _toggleShuffle() async {
+    final next = !_shuffle;
+    setState(() => _shuffle = next);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('music_shuffle_v1', next);
+    await widget.handler.customAction('setShuffle', {'enabled': next});
+  }
+  Future<void> _toggleRepeat() async {
+    final next = !_repeat;
+    setState(() => _repeat = next);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('music_repeat_v1', next);
+    await widget.handler.customAction('setLoopMode', {'value': next ? 'all' : 'off'});
   }
   @override
   void dispose() {
@@ -847,11 +873,11 @@ class _MusicPlayerScreenState extends State<MusicPlayerScreen> with SingleTicker
           Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(_time(position), style: const TextStyle(color: Colors.white54, fontSize: 12)), Text('-${_time(duration > position ? duration - position : Duration.zero)}', style: const TextStyle(color: Colors.white54, fontSize: 12))])),
           const SizedBox(height: 20),
           Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-            IconButton(tooltip: _shuffle ? 'إلغاء العشوائي' : 'تشغيل عشوائي', onPressed: () { setState(() => _shuffle = !_shuffle); widget.handler.customAction('setShuffle', {'enabled': _shuffle}); }, color: _shuffle ? coral : Colors.white70, icon: const Icon(Icons.shuffle_rounded)),
+            IconButton(tooltip: _shuffle ? 'العشوائي مفعّل' : 'تشغيل عشوائي', onPressed: _toggleShuffle, style: IconButton.styleFrom(backgroundColor: _shuffle ? coral.withOpacity(.22) : Colors.transparent), color: _shuffle ? coral : Colors.white70, icon: const Icon(Icons.shuffle_rounded)),
             IconButton(onPressed: () => widget.handler.skipToPrevious(), color: Colors.white, iconSize: 38, icon: const Icon(Icons.skip_previous_rounded)),
             Container(width: 72, height: 72, decoration: const BoxDecoration(shape: BoxShape.circle, color: coral, boxShadow: [BoxShadow(color: Color(0x66EF4444), blurRadius: 20)]), child: IconButton(color: Colors.white, iconSize: 40, onPressed: () => state.playing ? widget.handler.pause() : widget.handler.play(), icon: Icon(state.playing ? Icons.pause_rounded : Icons.play_arrow_rounded))),
             IconButton(onPressed: () => widget.handler.skipToNext(), color: Colors.white, iconSize: 38, icon: const Icon(Icons.skip_next_rounded)),
-            IconButton(tooltip: _repeat ? 'تكرار القائمة' : 'تكرار الأغنية', onPressed: () { setState(() => _repeat = !_repeat); widget.handler.customAction('setLoopMode', {'value': _repeat ? 'all' : 'off'}); }, color: _repeat ? coral : Colors.white70, icon: const Icon(Icons.repeat_rounded)),
+            IconButton(tooltip: _repeat ? 'تكرار القائمة مفعّل' : 'تفعيل تكرار القائمة', onPressed: _toggleRepeat, style: IconButton.styleFrom(backgroundColor: _repeat ? coral.withOpacity(.22) : Colors.transparent), color: _repeat ? coral : Colors.white70, icon: const Icon(Icons.repeat_rounded)),
           ]),
           const SizedBox(height: 20),
           OutlinedButton.icon(onPressed: _showQueue, icon: const Icon(Icons.queue_music_rounded), label: const Text('عرض قائمة الانتظار'), style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Color(0xFF444444)), padding: const EdgeInsets.symmetric(vertical: 14))),
@@ -967,12 +993,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Offset? _gestureStart;
   double _startLevel = .5;
   bool _brightnessGesture = false;
+  String? _levelOverlayText;
+  IconData _levelOverlayIcon = Icons.volume_up_rounded;
+  double _levelOverlay = .5;
+  Timer? _overlayTimer;
   Timer? _hideTimer;
   DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
   @override
   void initState() {
     super.initState();
     _isFavorite = widget.favorite;
+    _loadVideoModes();
     _playlistIndex = widget.playlist.indexWhere((e) => e.id == widget.entry.id);
     if (_playlistIndex < 0) _playlistIndex = 0;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -1043,22 +1074,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     return null;
   }
-  void _gestureStartAt(DragStartDetails d) {
+  Future<void> _loadVideoModes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final repeat = prefs.getBool('video_repeat_v1') ?? false;
+    final shuffle = prefs.getBool('video_shuffle_v1') ?? false;
+    if (!mounted) return;
+    setState(() { _repeat = repeat; _shuffle = shuffle; });
+    if (controller.value.isInitialized) await controller.setLooping(repeat);
+  }
+  void _showLevelOverlay(String label, IconData icon, double level) {
+    _overlayTimer?.cancel();
+    if (!mounted) return;
+    setState(() { _levelOverlayText = '$label ${ (level * 100).round() }%'; _levelOverlayIcon = icon; _levelOverlay = level; });
+    _overlayTimer = Timer(const Duration(milliseconds: 1100), () { if (mounted) setState(() => _levelOverlayText = null); });
+  }
+  Future<void> _gestureStartAt(DragStartDetails d) async {
     _gestureStart = d.localPosition;
     _brightnessGesture = d.localPosition.dx < MediaQuery.sizeOf(context).width / 2;
-    _startLevel = .5;
-    if (_brightnessGesture) {
-      ScreenBrightness().current.then((v) => _startLevel = v);
-    } else {
-      VolumeController().getVolume().then((v) => _startLevel = v);
-    }
+    try {
+      _startLevel = _brightnessGesture ? await ScreenBrightness().current : await VolumeController().getVolume();
+      _showLevelOverlay(_brightnessGesture ? 'السطوع' : 'الصوت', _brightnessGesture ? Icons.brightness_6_rounded : Icons.volume_up_rounded, _startLevel);
+    } catch (_) { _startLevel = .5; }
   }
   void _gestureUpdate(DragUpdateDetails d) {
     final start = _gestureStart;
     if (start == null) return;
     final level = (_startLevel + (start.dy - d.localPosition.dy) / MediaQuery.sizeOf(context).height * 2).clamp(0.0, 1.0);
-    if (_brightnessGesture) { ScreenBrightness().setScreenBrightness(level); }
-    else { VolumeController().setVolume(level); }
+    if (_brightnessGesture) { ScreenBrightness().setScreenBrightness(level); _showLevelOverlay('السطوع', Icons.brightness_6_rounded, level); }
+    else { VolumeController().setVolume(level); _showLevelOverlay('الصوت', Icons.volume_up_rounded, level); }
   }
   Future<void> _startBackgroundAudio() async {
     try {
@@ -1109,19 +1152,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _longPressActive = true;
     final speed = _speedForLongPress(details.localPosition, MediaQuery.sizeOf(context));
     await controller.setPlaybackSpeed(speed);
-    if (mounted) setState(() {});
+    _showLevelOverlay('السرعة', Icons.speed_rounded, (speed / 2).clamp(0.0, 1.0));
+    if (mounted) { setState(() {}); _levelOverlayText = 'السرعة ${speed}×'; }
     _showControls();
   }
   Future<void> _endSpeedBoost() async {
     if (!_longPressActive) return;
     _longPressActive = false;
     await controller.setPlaybackSpeed(1.0);
-    if (mounted) setState(() {});
+    if (mounted) { setState(() => _levelOverlayText = 'السرعة 1.0×'); _overlayTimer?.cancel(); _overlayTimer = Timer(const Duration(milliseconds: 900), () { if (mounted) setState(() => _levelOverlayText = null); }); }
     _showControls();
   }
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _overlayTimer?.cancel();
     controller.removeListener(_update);
     controller.dispose();
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
@@ -1141,8 +1186,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     widget.onNavigate(widget.playlist[nextIndex]);
   }
   Future<void> _toggleRepeat() async {
-    setState(() => _repeat = !_repeat);
-    await controller.setLooping(_repeat);
+    final next = !_repeat;
+    setState(() => _repeat = next);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('video_repeat_v1', next);
+    await controller.setLooping(next);
+  }
+  Future<void> _toggleShuffle() async {
+    final next = !_shuffle;
+    setState(() => _shuffle = next);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('video_shuffle_v1', next);
   }
   void _toggleFavorite() {
     setState(() => _isFavorite = !_isFavorite);
@@ -1157,7 +1211,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),
       if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
         Row(children: [IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.arrow_back, color: Colors.white)), Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))), IconButton(tooltip: 'تشغيل الصوت في الخلفية', onPressed: _startBackgroundAudio, icon: const Icon(Icons.headphones_rounded, color: Colors.white)), IconButton(onPressed: _toggleFavorite, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)), PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
-          if (value.startsWith('speed:')) controller.setPlaybackSpeed(double.parse(value.substring(6)));
+          if (value.startsWith('speed:')) { final speed = double.parse(value.substring(6)); controller.setPlaybackSpeed(speed); setState(() => _levelOverlayText = 'السرعة ${speed}×'); _overlayTimer?.cancel(); _overlayTimer = Timer(const Duration(milliseconds: 1200), () { if (mounted) setState(() => _levelOverlayText = null); }); }
           if (value == 'fit') setState(() => fillScreen = !fillScreen);
           if (value == 'rotate') _toggleFullscreen();
           if (value == 'subtitle') _loadSubtitle();
@@ -1183,8 +1237,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
           IconButton(tooltip: 'الفيديو التالي', onPressed: () => _navigatePlaylist(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 34)),
         ]),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          IconButton(tooltip: _repeat ? 'إيقاف التكرار' : 'تكرار الفيديو', onPressed: _toggleRepeat, icon: Icon(Icons.repeat_rounded, color: _repeat ? coral : Colors.white)),
-          IconButton(tooltip: _shuffle ? 'إيقاف العشوائي' : 'تشغيل عشوائي', onPressed: () => setState(() => _shuffle = !_shuffle), icon: Icon(Icons.shuffle_rounded, color: _shuffle ? coral : Colors.white)),
+          IconButton(tooltip: _repeat ? 'التكرار مفعّل' : 'تفعيل التكرار', onPressed: _toggleRepeat, style: IconButton.styleFrom(backgroundColor: _repeat ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.repeat_rounded, color: _repeat ? coral : Colors.white)),
+          IconButton(tooltip: _shuffle ? 'العشوائي مفعّل' : 'تشغيل عشوائي', onPressed: _toggleShuffle, style: IconButton.styleFrom(backgroundColor: _shuffle ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.shuffle_rounded, color: _shuffle ? coral : Colors.white)),
         ]),
         const Spacer(),
         Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: Column(children: [
@@ -1192,6 +1246,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           Row(children: [Text(_time(v.position), style: const TextStyle(color: Colors.white, fontSize: 12)), const Spacer(), Text('-${_time(v.duration - v.position)}', style: const TextStyle(color: Colors.white, fontSize: 12)), IconButton(tooltip: 'ملء الشاشة / احتواء', onPressed: () => setState(() => fillScreen = !fillScreen), icon: Icon(fillScreen ? Icons.fit_screen : Icons.fullscreen, color: Colors.white)), IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)), IconButton(tooltip: 'قفل اللمس', onPressed: () { setState(() => locked = true); _hideTimer?.cancel(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); }, icon: const Icon(Icons.lock_open, color: Colors.white))]),
         ])),
       ])))),
+      if (_levelOverlayText != null) Positioned.fill(child: IgnorePointer(child: Center(child: Container(padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16), decoration: BoxDecoration(color: const Color(0xE6101010), borderRadius: BorderRadius.circular(18), border: Border.all(color: coral.withOpacity(.9), width: 1.5)), child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(_levelOverlayIcon, color: coral, size: 30), const SizedBox(height: 6), Text(_levelOverlayText!, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)), if (_levelOverlayText!.startsWith('السطوع') || _levelOverlayText!.startsWith('الصوت')) ...[const SizedBox(height: 8), SizedBox(width: 130, child: LinearProgressIndicator(value: _levelOverlay, backgroundColor: Colors.white24, valueColor: const AlwaysStoppedAnimation<Color>(coral)))]])))),
       if (locked) Positioned(left: 16, bottom: 32, child: IconButton.filledTonal(onPressed: () { setState(() { locked = false; controls = true; }); SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); }, icon: const Icon(Icons.lock))),
     ]))));
   }
