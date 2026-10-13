@@ -470,7 +470,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           })
         : ListView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, itemBuilder: (context, i) {
             final e = entries[i];
-            return Card(child: ListTile(leading: const Icon(Icons.folder_rounded, color: coral), title: Text(_folderLabel(e.key), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text('${e.value.length} فيديو'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: e.key, entries: e.value, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)))));
+            return Card(child: ListTile(leading: const Icon(Icons.folder_rounded, color: coral), title: Text(_folderLabel(e.key), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(e.value.any((v) => newMediaIds.contains(v.id)) && !seenFolderPaths.contains(e.key) ? 'NEW · ${e.value.length} فيديو' : '${e.value.length} فيديو', style: TextStyle(color: e.value.any((v) => newMediaIds.contains(v.id)) && !seenFolderPaths.contains(e.key) ? coral : null)), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: e.key, entries: e.value, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)))));
           })),
     ]);
   }
