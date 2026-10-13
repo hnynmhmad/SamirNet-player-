@@ -619,7 +619,8 @@ class AudioLibraryScreen extends StatefulWidget {
   State<AudioLibraryScreen> createState() => _AudioLibraryScreenState();
 }
 class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
-  bool loading = true, showAll = false, musicPlaying = false;
+  bool loading = true, showAll = false, musicPlaying = false, grid = true;
+  String sort = 'dateDesc';
   String? error, selectedFolder, currentTitle;
   List<MediaEntry> audio = [];
   AudioHandler? _handler;
@@ -650,6 +651,8 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
     }
   }
   Future<void> _load() async {
+    final viewPrefs = await SharedPreferences.getInstance();
+    if (mounted) setState(() { grid = viewPrefs.getBool('global_media_grid') ?? true; sort = viewPrefs.getString('video_sort') ?? 'dateDesc'; });
     if (mounted) setState(() { loading = true; error = null; });
     try {
       final permission = await PhotoManager.requestPermissionExtend(requestOption: const PermissionRequestOption(androidPermission: AndroidPermission(type: RequestType.audio, mediaLocation: false)));
@@ -731,9 +734,11 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
   @override
   Widget build(BuildContext context) {
     final groups = folders;
-    final items = selectedFolder == null ? audio : (groups[selectedFolder] ?? <MediaEntry>[]);
+    final items = _sortEntries(selectedFolder == null ? audio : (groups[selectedFolder] ?? <MediaEntry>[]), sort);
     return Directionality(textDirection: TextDirection.rtl, child: Scaffold(
-      appBar: AppBar(title: Text(selectedFolder ?? 'الصوتيات'), actions: [
+      appBar: AppBar(title: Text(selectedFolder == null ? 'الصوتيات' : _folderLabel(selectedFolder!)), actions: [
+        IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () async { final next = !grid; final p = await SharedPreferences.getInstance(); await p.setBool('global_media_grid', next); await p.setBool('video_grid', next); if (mounted) setState(() => grid = next); }, icon: Icon(grid ? Icons.view_list_rounded : Icons.grid_view_rounded)),
+        PopupMenuButton<String>(tooltip: 'ترتيب الوسائط', icon: const Icon(Icons.sort), onSelected: (v) async { final p = await SharedPreferences.getInstance(); await p.setString('video_sort', v); if (mounted) setState(() => sort = v); }, itemBuilder: (_) => const [PopupMenuItem(value: 'dateDesc', child: Text('الأحدث أولًا')), PopupMenuItem(value: 'dateAsc', child: Text('الأقدم أولًا')), PopupMenuItem(value: 'nameAsc', child: Text('الاسم: أ إلى ي')), PopupMenuItem(value: 'nameDesc', child: Text('الاسم: ي إلى أ')), PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')), PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا'))]),
         IconButton(tooltip: 'تحديث الصوتيات', onPressed: _load, icon: const Icon(Icons.refresh)),
         if (selectedFolder != null) IconButton(tooltip: 'رجوع للمجلدات', onPressed: () => setState(() => selectedFolder = null), icon: const Icon(Icons.folder)),
       ]),
@@ -743,23 +748,15 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
         : audio.isEmpty ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.music_off, size: 56, color: coral), const SizedBox(height: 12), const Text('لم يتم العثور على ملفات صوتية'), const SizedBox(height: 8), const Text('تأكد من منح إذن الصوتيات ثم اضغط تحديث.', textAlign: TextAlign.center), const SizedBox(height: 12), FilledButton.icon(onPressed: _load, icon: const Icon(Icons.refresh), label: const Text('تحديث المكتبة'))])))
         : selectedFolder == null && !showAll ? Column(children: [
             Padding(padding: const EdgeInsets.all(12), child: Row(children: [Expanded(child: Text('${audio.length} ملف صوتي · ${groups.length} مجلد')), TextButton.icon(onPressed: () => setState(() => showAll = true), icon: const Icon(Icons.library_music), label: const Text('عرض الكل'))])),
-            Expanded(child: ListView.builder(itemCount: groups.length, itemBuilder: (context, i) {
-              final entry = groups.entries.elementAt(i);
-              return Card(margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: ListTile(leading: const CircleAvatar(child: Icon(Icons.folder, color: Color(0xFF3979D5))), title: Text(entry.key), subtitle: Text('${entry.value.length} ملف صوتي'), trailing: const Icon(Icons.chevron_left), onTap: () => setState(() => selectedFolder = entry.key)));
-            })),
+            Expanded(child: grid
+              ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: groups.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.25, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (context, i) { final entry = groups.entries.elementAt(i); return Card(child: InkWell(onTap: () => setState(() => selectedFolder = entry.key), child: Padding(padding: const EdgeInsets.all(12), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [const Icon(Icons.folder, color: Color(0xFF3979D5), size: 34), const SizedBox(height: 8), Text(_folderLabel(entry.key), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)), Text('${entry.value.length} ملف صوتي')])))); })
+              : ListView.builder(itemCount: groups.length, itemBuilder: (context, i) { final entry = groups.entries.elementAt(i); return Card(margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: ListTile(leading: const CircleAvatar(child: Icon(Icons.folder, color: Color(0xFF3979D5))), title: Text(_folderLabel(entry.key)), subtitle: Text('${entry.value.length} ملف صوتي'), trailing: const Icon(Icons.chevron_left), onTap: () => setState(() => selectedFolder = entry.key))); })),
           ])
         : Column(children: [
             if (selectedFolder == null) Align(alignment: Alignment.centerRight, child: TextButton.icon(onPressed: () => setState(() => showAll = false), icon: const Icon(Icons.folder), label: const Text('عرض المجلدات'))),
-            Expanded(child: ListView.builder(itemCount: items.length, itemBuilder: (context, i) {
-              final e = items[i];
-              return ListTile(
-                leading: const CircleAvatar(backgroundColor: Color(0xFF252525), child: Icon(Icons.album_rounded, color: Color(0xFFEF4444))),
-                title: Text(e.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-                subtitle: Text(_formatDuration(e.duration)),
-                trailing: const Icon(Icons.play_circle_fill_rounded, color: coral, size: 30),
-                onTap: () => _openMusicPlayer(items, i),
-              );
-            })),
+            Expanded(child: grid
+              ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: items.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.2, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (context, i) { final e = items[i]; return Card(child: InkWell(onTap: () => _openMusicPlayer(items, i), child: Padding(padding: const EdgeInsets.all(12), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [const CircleAvatar(backgroundColor: Color(0xFF252525), child: Icon(Icons.album_rounded, color: Color(0xFFEF4444))), const SizedBox(height: 8), Text(e.name, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center), Text(_formatDuration(e.duration), style: const TextStyle(color: Colors.grey)), const Icon(Icons.play_circle_fill_rounded, color: coral, size: 25)])))); })
+              : ListView.builder(itemCount: items.length, itemBuilder: (context, i) { final e = items[i]; return ListTile(leading: const CircleAvatar(backgroundColor: Color(0xFF252525), child: Icon(Icons.album_rounded, color: Color(0xFFEF4444))), title: Text(e.name, maxLines: 2, overflow: TextOverflow.ellipsis), subtitle: Text(_formatDuration(e.duration)), trailing: const Icon(Icons.play_circle_fill_rounded, color: coral, size: 30), onTap: () => _openMusicPlayer(items, i)); })),
           ]),
     ));
   }
