@@ -455,7 +455,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final groups = <String, List<MediaEntry>>{};
     for (final v in videos) {
       final raw = (v.asset.relativePath ?? '').replaceAll('\\\\', '/').replaceAll(RegExp(r'/+$'), '');
-      final parts = raw.split('/').where((part) => part.trim().isNotEmpty).toList();
       groups.putIfAbsent(raw.isEmpty ? '__root__' : raw, () => []).add(v);
     }
     final entries = groups.entries.toList();
@@ -522,12 +521,13 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
   Future<void> _loadViewPrefs() async {
     final p = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() { sort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('video_grid') ?? true; });
+    setState(() { sort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('global_media_grid') ?? p.getBool('video_grid') ?? true; });
   }
   Future<void> _saveViewPrefs() async {
     final p = await SharedPreferences.getInstance();
     await p.setString('video_sort', sort);
     await p.setBool('video_grid', grid);
+    await p.setBool('global_media_grid', grid);
   }
   final Set<String> selected = {};
   List<MediaEntry> get sorted {
@@ -674,7 +674,6 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
     final result = <String, List<MediaEntry>>{};
     for (final item in audio) {
       final raw = (item.asset.relativePath ?? '').replaceAll('\\\\', '/').replaceAll(RegExp(r'/+$'), '');
-      final parts = raw.split('/').where((p) => p.trim().isNotEmpty).toList();
       final name = parts.isEmpty ? 'المجلد الرئيسي' : parts.last;
       result.putIfAbsent(raw.isEmpty ? '__root__' : raw, () => []).add(item);
     }
@@ -1164,12 +1163,13 @@ class _FolderVideosScreenState extends State<FolderVideosScreen> {
   Future<void> _loadViewPrefs() async {
     final p = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() { sort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('video_grid') ?? true; });
+    setState(() { sort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('global_media_grid') ?? p.getBool('video_grid') ?? true; });
   }
   Future<void> _saveViewPrefs() async {
     final p = await SharedPreferences.getInstance();
     await p.setString('video_sort', sort);
     await p.setBool('video_grid', grid);
+    await p.setBool('global_media_grid', grid);
   }
   List<MediaEntry> get sortedEntries => _sortEntries(widget.entries, sort);
   @override
