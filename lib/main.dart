@@ -55,6 +55,74 @@ Future<void> main() async {
 
 class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   final AudioPlayer _player = AudioPlayer();
+  VideoPlayerController? _foregroundVideoController;
+  String? _foregroundVideoId;
+  String? _foregroundVideoTitle;
+  bool _backgroundQueueActive = false;
+  Duration _lastForegroundPosition = Duration.zero;
+  bool? _lastForegroundPlaying;
+
+  void bindForegroundVideo(
+    VideoPlayerController controller, {
+    required String id,
+    required String title,
+  }) {
+    _foregroundVideoController = controller;
+    _foregroundVideoId = id;
+    _foregroundVideoTitle = title;
+    _backgroundQueueActive = false;
+    _lastForegroundPosition = Duration.zero;
+    _lastForegroundPlaying = null;
+    syncForegroundVideoState(force: true);
+  }
+
+  void clearForegroundVideo(VideoPlayerController controller) {
+    if (!identical(_foregroundVideoController, controller) || _backgroundQueueActive) return;
+    _foregroundVideoController = null;
+    _foregroundVideoId = null;
+    _foregroundVideoTitle = null;
+    mediaItem.add(null);
+    unawaited(stop());
+  }
+
+  void syncForegroundVideoState({bool force = false}) {
+    final controller = _foregroundVideoController;
+    if (_backgroundQueueActive || controller == null || !controller.value.isInitialized) return;
+    final value = controller.value;
+    final position = value.position;
+    if (!force &&
+        _lastForegroundPlaying == value.isPlaying &&
+        (position - _lastForegroundPosition).inMilliseconds.abs() < 900) {
+      return;
+    }
+    _lastForegroundPlaying = value.isPlaying;
+    _lastForegroundPosition = position;
+    final id = _foregroundVideoId;
+    if (id == null) return;
+    mediaItem.add(MediaItem(
+      id: 'foreground:$id',
+      title: _foregroundVideoTitle ?? 'SM Player',
+      artist: 'SM Player',
+      duration: value.duration,
+    ));
+    playbackState.add(playbackState.value.copyWith(
+      controls: [
+        value.isPlaying ? MediaControl.pause : MediaControl.play,
+        MediaControl.stop,
+      ],
+      systemActions: const {
+        MediaAction.seek,
+        MediaAction.seekForward,
+        MediaAction.seekBackward,
+      },
+      androidCompactActionIndices: const [0],
+      processingState: AudioProcessingState.ready,
+      playing: value.isPlaying,
+      updatePosition: position,
+      bufferedPosition: position,
+      speed: 1.0,
+    ));
+  }
   SNBackgroundAudioHandler() {
     Timer.periodic(const Duration(milliseconds: 250), (_) {
       if (_player.playing) {
@@ -159,6 +227,10 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     if (files.isEmpty || files.length != titles.length) {
       throw ArgumentError('The music queue is empty or invalid');
     }
+    _backgroundQueueActive = true;
+    _foregroundVideoController = null;
+    _foregroundVideoId = null;
+    _foregroundVideoTitle = null;
     final items = List<MediaItem>.generate(files.length, (i) =>
       MediaItem(id: files[i].path, title: titles[i], artist: 'SM Player'));
     final start = initialIndex.clamp(0, files.length - 1).toInt();
@@ -212,17 +284,36 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
   }
   @override
   Future<void> play() async {
+    final video = _foregroundVideoController;
+    if (!_backgroundQueueActive && video != null) {
+      await video.play();
+      syncForegroundVideoState(force: true);
+      return;
+    }
     await _player.play();
     playbackState.add(playbackState.value.copyWith(playing: true, updatePosition: _player.position));
   }
   @override
   Future<void> pause() async {
+    final video = _foregroundVideoController;
+    if (!_backgroundQueueActive && video != null) {
+      await video.pause();
+      syncForegroundVideoState(force: true);
+      return;
+    }
     await _player.pause();
     playbackState.add(playbackState.value.copyWith(playing: false, updatePosition: _player.position));
   }
   @override
   Future<void> stop() async {
+    final video = _foregroundVideoController;
+    if (!_backgroundQueueActive && video != null) {
+      await video.pause();
+      syncForegroundVideoState(force: true);
+      return;
+    }
     await _player.stop();
+    _backgroundQueueActive = false;
     playbackState.add(playbackState.value.copyWith(
       playing: false,
       processingState: AudioProcessingState.idle,
@@ -231,9 +322,25 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     await super.stop();
   }
   @override
-  Future<void> seek(Duration position) => _player.seek(position);
+  Future<void> seek(Duration position) async {
+    final video = _foregroundVideoController;
+    if (!_backgroundQueueActive && video != null) {
+      await video.seekTo(position);
+      syncForegroundVideoState(force: true);
+      return;
+    }
+    await _player.seek(position);
+  }
   @override
-  Future<void> setSpeed(double speed) => _player.setSpeed(speed);
+  Future<void> setSpeed(double speed) async {
+    final video = _foregroundVideoController;
+    if (!_backgroundQueueActive && video != null) {
+      await video.setPlaybackSpeed(speed);
+      syncForegroundVideoState(force: true);
+      return;
+    }
+    await _player.setSpeed(speed);
+  }
   @override
   Future<dynamic> customAction(String name, [Map<String, dynamic>? extras]) async {
     if (name == 'playFileInBackground') {
@@ -1352,6 +1459,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   Timer? _overlayTimer;
   Timer? _hideTimer;
   StreamSubscription<PlaybackState>? _backgroundPlaybackSub;
+  SNBackgroundAudioHandler? _foregroundHandler;
   List<MediaEntry?> _backgroundQueueEntries = [];
   int? _lastBackgroundQueueIndex;
   int? _pendingBackgroundQueueIndex;
@@ -1405,6 +1513,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         _attachBackgroundPlaybackListener(handler);
       } else {
         await controller.play();
+        _foregroundHandler = handler as SNBackgroundAudioHandler;
+        _foregroundHandler!.bindForegroundVideo(
+          controller,
+          id: widget.file.path,
+          title: widget.entry.name,
+        );
         if (mounted) setState(() => ready = true);
       }
       _scheduleHide();
@@ -1416,6 +1530,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
   void _update() {
     if (!mounted) return;
+    if (!_backgroundAudioActive) {
+      _foregroundHandler?.syncForegroundVideoState();
+    }
     if (_backgroundAudioActive && !_syncingBackgroundAudio && controller.value.isInitialized) {
       final playing = controller.value.isPlaying;
       if (_lastVideoPlaying != playing) {
@@ -1624,8 +1741,14 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         final handler = await _getBackgroundAudioHandler();
         await handler.stop();
         await controller.setVolume(1.0);
-        // Stopping the background session pauses its mirrored video. When the
-        // user turns background mode off, return to normal in-app playback.
+        // Restore the foreground video as the media-session target after ending
+        // the background audio queue, so notification controls remain functional.
+        _foregroundHandler = handler as SNBackgroundAudioHandler;
+        _foregroundHandler!.bindForegroundVideo(
+          controller,
+          id: widget.file.path,
+          title: widget.entry.name,
+        );
         if (controller.value.isInitialized && !controller.value.isPlaying) {
           await controller.play();
         }
@@ -1679,6 +1802,20 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يظهر إشعار التحكم، ويمكنك استخدام السابق والتالي والتقديم والإرجاع.')));
     } catch (e) {
       try { await controller.setVolume(1.0); } catch (_) {}
+      try {
+        final handler = await _getBackgroundAudioHandler();
+        if (handler is SNBackgroundAudioHandler) {
+          await handler.stop();
+          handler.bindForegroundVideo(
+            controller,
+            id: widget.file.path,
+            title: widget.entry.name,
+          );
+          _foregroundHandler = handler;
+        }
+      } catch (restoreError) {
+        debugPrint('SamirNet could not restore foreground media session: $restoreError');
+      }
       if (mounted) setState(() => _backgroundAudioActive = false);
       debugPrint('SamirNet background audio startup failed: $e');
       if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الخلفية: $e')));
@@ -1741,6 +1878,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _hideTimer?.cancel();
     _overlayTimer?.cancel();
     _backgroundPlaybackSub?.cancel();
+    if (!_backgroundAudioActive) {
+      _foregroundHandler?.clearForegroundVideo(controller);
+    }
     controller.removeListener(_update);
     controller.dispose();
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
