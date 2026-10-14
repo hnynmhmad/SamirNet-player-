@@ -1337,6 +1337,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   Timer? _overlayTimer;
   Timer? _hideTimer;
   StreamSubscription<PlaybackState>? _backgroundPlaybackSub;
+  List<MediaEntry?> _backgroundQueueEntries = [];
+  int? _lastBackgroundQueueIndex;
+  int? _pendingBackgroundQueueIndex;
   DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
   bool? _lastVideoPlaying;
   DateTime _lastBackgroundSync = DateTime.fromMillisecondsSinceEpoch(0);
@@ -1361,13 +1364,37 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       if (resume > 0 && resume < controller.value.duration.inMilliseconds - 3000) {
         await controller.seekTo(Duration(milliseconds: resume));
       }
-      if (mounted) setState(() => ready = true);
       final modePrefs = await SharedPreferences.getInstance();
       await controller.setLooping(modePrefs.getBool('video_repeat_v1') ?? false);
-      await controller.play();
+
+      // If a notification skip changed the active video, attach this screen to the
+      // existing media session rather than starting a second audible playback.
+      final handler = await _getBackgroundAudioHandler();
+      final activeItem = handler.mediaItem.value;
+      final activeState = handler.playbackState.value;
+      if (activeState.playing && activeItem?.id == widget.file.path) {
+        await controller.setVolume(0.0);
+        if (activeState.position > Duration.zero) {
+          await controller.seekTo(activeState.position);
+        }
+        await controller.play();
+        await _loadBackgroundQueueEntries(handler);
+        _lastBackgroundQueueIndex = activeState.queueIndex;
+        if (mounted) setState(() {
+          ready = true;
+          _backgroundAudioActive = true;
+          _lastVideoPlaying = true;
+          _lastBackgroundSync = DateTime.now();
+        });
+        _attachBackgroundPlaybackListener(handler);
+      } else {
+        await controller.play();
+        if (mounted) setState(() => ready = true);
+      }
       _scheduleHide();
     }).catchError((Object error) {
       if (mounted) setState(() => ready = false);
+      debugPrint('Video player initialization failed: $error');
     });
     controller.addListener(_update);
   }
@@ -1487,6 +1514,17 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _pendingBackgroundQueueIndex != null) {
+      final index = _pendingBackgroundQueueIndex!;
+      _pendingBackgroundQueueIndex = null;
+      if (index >= 0 && index < _backgroundQueueEntries.length) {
+        final entry = _backgroundQueueEntries[index];
+        if (entry != null && entry.id != widget.entry.id) {
+          widget.onNavigate(entry);
+          return;
+        }
+      }
+    }
     if (state == AppLifecycleState.paused &&
         mounted &&
         controller.value.isInitialized &&
@@ -1496,6 +1534,55 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       // keep audio alive and expose notification controls after Home is pressed.
       unawaited(_startBackgroundAudio(showFeedback: false));
     }
+  }
+
+  Future<void> _loadBackgroundQueueEntries(AudioHandler handler) async {
+    final entriesByPath = <String, MediaEntry>{};
+    for (final entry in widget.playlist) {
+      final file = entry.id == widget.entry.id ? widget.file : await entry.asset.file;
+      if (file != null) entriesByPath[file.path] = entry;
+    }
+    _backgroundQueueEntries = handler.queue.value
+        .map((item) => entriesByPath[item.id])
+        .toList(growable: false);
+  }
+
+  void _attachBackgroundPlaybackListener(AudioHandler handler) {
+    _backgroundPlaybackSub?.cancel();
+    _backgroundPlaybackSub = handler.playbackState.listen((state) async {
+      if (!_backgroundAudioActive || !mounted || !controller.value.isInitialized) return;
+      final index = state.queueIndex;
+      if (index != null && index != _lastBackgroundQueueIndex) {
+        _lastBackgroundQueueIndex = index;
+        if (index >= 0 && index < _backgroundQueueEntries.length) {
+          final nextEntry = _backgroundQueueEntries[index];
+          if (nextEntry != null && nextEntry.id != widget.entry.id) {
+            if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+              widget.onNavigate(nextEntry);
+              return;
+            }
+            _pendingBackgroundQueueIndex = index;
+          }
+        }
+      }
+      final positionDelta =
+          (state.position - controller.value.position).inMilliseconds.abs();
+      if (positionDelta > 1800 && !_syncingBackgroundAudio) {
+        _syncingBackgroundAudio = true;
+        _lastBackgroundSync = DateTime.now();
+        try {
+          // Seeking from the Android notification must move the visible video too.
+          await controller.seekTo(state.position);
+        } finally {
+          _syncingBackgroundAudio = false;
+        }
+      }
+      if (state.playing && !controller.value.isPlaying) {
+        await controller.play();
+      } else if (!state.playing && controller.value.isPlaying) {
+        await controller.pause();
+      }
+    });
   }
 
   Future<void> _startBackgroundAudio({bool showFeedback = true}) async {
@@ -1524,30 +1611,38 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       if (!controller.value.isPlaying) await controller.play();
       await prefs.setInt('resume_${widget.entry.id}', resumePosition.inMilliseconds);
       final handler = await _getBackgroundAudioHandler();
-      await handler.customAction('playFileInBackground', {'path': widget.file.path, 'title': 'فيديو · ${widget.entry.name}', 'positionMs': resumePosition.inMilliseconds});
+
+      // Build the same video order into the Android media queue so notification
+      // Previous/Next can change tracks, not merely restart the current video.
+      final queueEntries = <MediaEntry>[];
+      final queueFiles = <File>[];
+      final queueTitles = <String>[];
+      for (final entry in widget.playlist) {
+        final file = entry.id == widget.entry.id ? widget.file : await entry.asset.file;
+        if (file == null) continue;
+        queueEntries.add(entry);
+        queueFiles.add(file);
+        queueTitles.add(entry.name);
+      }
+      var startIndex = queueEntries.indexWhere((entry) => entry.id == widget.entry.id);
+      if (startIndex < 0) {
+        queueEntries.add(widget.entry);
+        queueFiles.add(widget.file);
+        queueTitles.add(widget.entry.name);
+        startIndex = queueEntries.length - 1;
+      }
+      _backgroundQueueEntries = queueEntries;
+      _lastBackgroundQueueIndex = startIndex;
+      _pendingBackgroundQueueIndex = null;
+      await (handler as SNBackgroundAudioHandler).playQueueInBackground(
+        queueFiles,
+        queueTitles,
+        startIndex,
+        startPosition: controller.value.position,
+      );
       if (mounted) setState(() { _backgroundAudioActive = true; _lastVideoPlaying = controller.value.isPlaying; _lastBackgroundSync = DateTime.now(); });
-      await _backgroundPlaybackSub?.cancel();
-      _backgroundPlaybackSub = handler.playbackState.listen((state) async {
-        if (!_backgroundAudioActive || !mounted || !controller.value.isInitialized) return;
-        final positionDelta =
-            (state.position - controller.value.position).inMilliseconds.abs();
-        if (positionDelta > 1800 && !_syncingBackgroundAudio) {
-          _syncingBackgroundAudio = true;
-          _lastBackgroundSync = DateTime.now();
-          try {
-            // Seeking from the Android notification must move the visible video too.
-            await controller.seekTo(state.position);
-          } finally {
-            _syncingBackgroundAudio = false;
-          }
-        }
-        if (state.playing && !controller.value.isPlaying) {
-          await controller.play();
-        } else if (!state.playing && controller.value.isPlaying) {
-          await controller.pause();
-        }
-      });
-      if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يستمر الفيديو بصورته، ويظهر إشعار التحكم عند تشغيل الصوت. اضغط الزر مرة أخرى لإيقافه.')));
+      _attachBackgroundPlaybackListener(handler);
+      if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يظهر إشعار التحكم، ويمكنك استخدام السابق والتالي والتقديم والإرجاع.')));
     } catch (e) {
       try { await controller.setVolume(1.0); } catch (_) {}
       if (mounted) setState(() => _backgroundAudioActive = false);
