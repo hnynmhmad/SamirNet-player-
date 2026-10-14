@@ -74,6 +74,28 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
         speed: _player.speed,
       ));
     });
+    // playing is an independent state in just_audio. playbackEventStream does
+    // not reliably emit when play/pause is requested, so publish playerStateStream
+    // directly to audio_service. Android promotes the media service only after
+    // playbackState.playing becomes true; missing this transition can hide the
+    // media notification even while the player itself is audible.
+    _player.playerStateStream.listen((state) {
+      final processingState = const {
+        ProcessingState.idle: AudioProcessingState.idle,
+        ProcessingState.loading: AudioProcessingState.loading,
+        ProcessingState.buffering: AudioProcessingState.buffering,
+        ProcessingState.ready: AudioProcessingState.ready,
+        ProcessingState.completed: AudioProcessingState.completed,
+      }[state.processingState]!;
+      debugPrint('SamirNet player state: playing=${state.playing}, processing=${state.processingState}');
+      playbackState.add(playbackState.value.copyWith(
+        playing: state.playing,
+        processingState: processingState,
+        updatePosition: _player.position,
+        bufferedPosition: _player.bufferedPosition,
+        speed: _player.speed,
+      ));
+    });
     _player.playbackEventStream.listen((event) {
       final playing = _player.playing;
       playbackState.add(playbackState.value.copyWith(
