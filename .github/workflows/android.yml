@@ -209,6 +209,18 @@ jobs:
                       source = source.replace('import io.flutter.embedding.android.FlutterActivity', 'import io.flutter.embedding.android.FlutterActivity\n' + imp, 1)
               declaration = 'class MainActivity : FlutterActivity()'
               implementation = '''class MainActivity : AudioServiceActivity() {
+              private var pendingNotificationPermissionResult: MethodChannel.Result? = null
+
+              override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+                  super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+                  if (requestCode == 1001) {
+                      val granted = grantResults.isNotEmpty() &&
+                          grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED
+                      pendingNotificationPermissionResult?.success(granted)
+                      pendingNotificationPermissionResult = null
+                  }
+              }
+
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.samirnet.snplayer/pip")
@@ -232,11 +244,15 @@ jobs:
                       .setMethodCallHandler { call, result ->
                           when (call.method) {
                               "requestPermission" -> {
-                                  if (Build.VERSION.SDK_INT >= 33 &&
-                                      checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                  if (Build.VERSION.SDK_INT < 33 ||
+                                      checkSelfPermission("android.permission.POST_NOTIFICATIONS") == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                      result.success(true)
+                                  } else if (pendingNotificationPermissionResult != null) {
+                                      result.error("PERMISSION_REQUEST_IN_PROGRESS", "Notification permission request is already in progress", null)
+                                  } else {
+                                      pendingNotificationPermissionResult = result
                                       requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1001)
                                   }
-                                  result.success(true)
                               }
                               "requestAllFilesAccess" -> {
                                   if (Build.VERSION.SDK_INT >= 30 && !Environment.isExternalStorageManager()) {
