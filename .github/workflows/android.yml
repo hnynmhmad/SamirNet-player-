@@ -333,7 +333,7 @@ jobs:
           for permission in permissions:
               tag = f'<uses-permission android:name="{permission}"/>'
               if permission not in manifest:
-                  manifest = manifest.replace('<application', tag + '\\n    <application', 1)
+                  manifest = manifest.replace('<application', tag + '\n    <application', 1)
           service = '''    <service
                   android:name="com.ryanheise.audioservice.AudioService"
                   android:foregroundServiceType="mediaPlayback"
@@ -356,7 +356,13 @@ jobs:
           if 'com.ryanheise.audioservice.AudioService' not in manifest or 'com.ryanheise.audioservice.MediaButtonReceiver' not in manifest:
               raise SystemExit('Failed to configure audio_service media notification components')
           path.write_text(manifest)
-          print('Configured foreground media playback service, media buttons, and Android notification permissions.')
+          import xml.etree.ElementTree as ET
+          ET.parse(path)
+          saved = path.read_text()
+          for permission in permissions:
+              if permission not in saved:
+                  raise SystemExit('Missing media permission after manifest update: ' + permission)
+          print('Configured and validated foreground media playback service, media buttons, and Android notification permissions.')
           PY
       - name: Set Android app compile SDK to 36
         shell: bash
