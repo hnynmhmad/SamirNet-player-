@@ -25,12 +25,6 @@ Future<AudioHandler>? _backgroundAudioHandlerFuture;
 
 Future<AudioHandler> _getBackgroundAudioHandler() {
   return _backgroundAudioHandlerFuture ??= (() async {
-    // Android 13+ may hide media notifications until notification permission is requested.
-    try {
-      await const MethodChannel('com.samirnet.snplayer/notifications').invokeMethod<bool>('requestPermission');
-    } catch (error) {
-      debugPrint('Notification permission request was unavailable: $error');
-    }
     return AudioService.init(
       builder: () => SNBackgroundAudioHandler(),
       config: AudioServiceConfig(
@@ -340,12 +334,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _requestFirstRunPermissions() async {
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool('first_run_notifications_requested') != true) {
+      var permissionGranted = !Platform.isAndroid;
       try {
-        await const MethodChannel('com.samirnet.snplayer/notifications').invokeMethod<bool>('requestPermission');
+        permissionGranted = await const MethodChannel('com.samirnet.snplayer/notifications')
+                .invokeMethod<bool>('requestPermission') ??
+            false;
       } catch (error) {
         debugPrint('Notification permission request failed: $error');
       }
-      await prefs.setBool('first_run_notifications_requested', true);
+      // Do not mark the request complete when Android reports denial. This lets
+      // the app retry on a later launch instead of silently suppressing the prompt.
+      if (permissionGranted) {
+        await prefs.setBool('first_run_notifications_requested', true);
+      }
     }
     if (prefs.getBool('first_run_all_files_prompted') != true && Platform.isAndroid) {
       try {
@@ -1417,15 +1418,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         }).catchError((Object error) {
           debugPrint('Background playback synchronization failed: $error');
         }).whenComplete(() { _syncingBackgroundAudio = false; });
-      } else if (playing && DateTime.now().difference(_lastBackgroundSync).inSeconds >= 2) {
-        _lastBackgroundSync = DateTime.now();
-        _syncingBackgroundAudio = true;
-        _getBackgroundAudioHandler().then((handler) async {
-          final delta = (handler.playbackState.value.updatePosition - controller.value.position).inMilliseconds.abs();
-          if (delta > 1500) await handler.seek(controller.value.position);
-        }).catchError((Object error) {
-          debugPrint('Background position synchronization failed: $error');
-        }).whenComplete(() { _syncingBackgroundAudio = false; });
       }
     }
     if (controller.value.isInitialized && DateTime.now().difference(_lastSaved).inSeconds >= 5) {
@@ -1579,10 +1571,23 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
           _syncingBackgroundAudio = false;
         }
       }
+      // The background media session is the source of truth for position.
+      // Guard these mirrored play/pause calls so they are not sent straight back
+      // to the audio handler by the video controller listener.
       if (state.playing && !controller.value.isPlaying) {
-        await controller.play();
+        _syncingBackgroundAudio = true;
+        try {
+          await controller.play();
+        } finally {
+          _syncingBackgroundAudio = false;
+        }
       } else if (!state.playing && controller.value.isPlaying) {
-        await controller.pause();
+        _syncingBackgroundAudio = true;
+        try {
+          await controller.pause();
+        } finally {
+          _syncingBackgroundAudio = false;
+        }
       }
     });
   }
@@ -1603,6 +1608,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         final handler = await _getBackgroundAudioHandler();
         await handler.stop();
         await controller.setVolume(1.0);
+        // Stopping the background session pauses its mirrored video. When the
+        // user turns background mode off, return to normal in-app playback.
+        if (controller.value.isInitialized && !controller.value.isPlaying) {
+          await controller.play();
+        }
         if (mounted) setState(() { _backgroundAudioActive = false; _lastVideoPlaying = null; });
         if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم إيقاف صوت الخلفية وإعادة صوت الفيديو.')));
         return;
@@ -1667,7 +1677,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     final delta = d.localPosition.dx - start.dx;
     final seconds = (delta / MediaQuery.sizeOf(context).width * 120).round();
     final targetMs = (_seekStartPosition.inMilliseconds + seconds * 1000).clamp(0, controller.value.duration.inMilliseconds);
-    controller.seekTo(Duration(milliseconds: targetMs));
+    final target = Duration(milliseconds: targetMs);
+    unawaited(controller.seekTo(target));
+    if (_backgroundAudioActive) {
+      unawaited(_getBackgroundAudioHandler().then((handler) => handler.seek(target)).catchError((Object error) {
+        debugPrint('Background seek synchronization failed: $error');
+      }));
+    }
     _showControls();
   }
   double _speedForLongPress(Offset p, Size size) {
@@ -1706,7 +1722,20 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
-  void _seek(int seconds) { final target = controller.value.position + Duration(seconds: seconds); controller.seekTo(target < Duration.zero ? Duration.zero : target); }
+  void _seek(int seconds) {
+    final rawTarget = controller.value.position + Duration(seconds: seconds);
+    final target = rawTarget < Duration.zero
+        ? Duration.zero
+        : rawTarget > controller.value.duration
+            ? controller.value.duration
+            : rawTarget;
+    unawaited(controller.seekTo(target));
+    if (_backgroundAudioActive) {
+      unawaited(_getBackgroundAudioHandler().then((handler) => handler.seek(target)).catchError((Object error) {
+        debugPrint('Background seek synchronization failed: $error');
+      }));
+    }
+  }
   void _navigatePlaylist(int direction, {bool randomize = false}) {
     if (widget.playlist.length < 2) return;
     final int nextIndex;
