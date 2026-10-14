@@ -333,7 +333,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
   Future<void> _requestFirstRunPermissions() async {
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool('first_run_notifications_requested') != true) {
+    if (prefs.getBool('first_run_notifications_requested_v2') != true) {
       var permissionGranted = !Platform.isAndroid;
       try {
         permissionGranted = await const MethodChannel('com.samirnet.snplayer/notifications')
@@ -345,7 +345,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       // Do not mark the request complete when Android reports denial. This lets
       // the app retry on a later launch instead of silently suppressing the prompt.
       if (permissionGranted) {
-        await prefs.setBool('first_run_notifications_requested', true);
+        await prefs.setBool('first_run_notifications_requested_v2', true);
       }
     }
     if (prefs.getBool('first_run_all_files_prompted') != true && Platform.isAndroid) {
