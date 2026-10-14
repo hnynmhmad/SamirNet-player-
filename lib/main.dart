@@ -10,7 +10,6 @@ import 'package:video_player/video_player.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:audio_service/audio_service.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'services/vault_service.dart';
@@ -53,13 +52,12 @@ class _SamirNetAppState extends State<SamirNetApp> {
   Future<void> _requestNotificationPermission() async {
     if (!Platform.isAndroid) return;
     try {
-      final current = await Permission.notification.status;
-      if (current.isGranted) {
-        debugPrint('Notification permission already granted');
-        return;
-      }
-      final result = await Permission.notification.request();
-      debugPrint('Notification permission result: $result');
+      // This native channel is installed by the Android build workflow and
+      // requests POST_NOTIFICATIONS from the actual Android Activity.
+      final granted = await const MethodChannel(
+        'com.samirnet.snplayer/notifications',
+      ).invokeMethod<bool>('requestPermission');
+      debugPrint('Notification permission granted: $granted');
     } catch (error, stack) {
       debugPrint('Notification permission request failed: $error\\n$stack');
     }
