@@ -74,23 +74,13 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
         speed: _player.speed,
       ));
     });
-    // playing is an independent state in just_audio. playbackEventStream does
-    // not reliably emit when play/pause is requested, so publish playerStateStream
-    // directly to audio_service. Android promotes the media service only after
-    // playbackState.playing becomes true; missing this transition can hide the
-    // media notification even while the player itself is audible.
-    _player.playerStateStream.listen((state) {
-      final processingState = const {
-        ProcessingState.idle: AudioProcessingState.idle,
-        ProcessingState.loading: AudioProcessingState.loading,
-        ProcessingState.buffering: AudioProcessingState.buffering,
-        ProcessingState.ready: AudioProcessingState.ready,
-        ProcessingState.completed: AudioProcessingState.completed,
-      }[state.processingState]!;
-      debugPrint('SamirNet player state: playing=${state.playing}, processing=${state.processingState}');
+    // just_audio's playbackEventStream does not emit for every play/pause
+    // command because the playing flag is a separate stream. Publish that flag
+    // independently so audio_service can reliably enter Android foreground mode.
+    _player.playingStream.listen((playing) {
+      debugPrint('SamirNet playingStream: playing=$playing');
       playbackState.add(playbackState.value.copyWith(
-        playing: state.playing,
-        processingState: processingState,
+        playing: playing,
         updatePosition: _player.position,
         bufferedPosition: _player.bufferedPosition,
         speed: _player.speed,
@@ -1368,6 +1358,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
   bool? _lastVideoPlaying;
   bool _syncingBackgroundAudio = false;
+  bool _backgroundAudioStarting = false;
   @override
   void initState() {
     super.initState();
@@ -1614,6 +1605,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   Future<void> _startBackgroundAudio({bool showFeedback = true}) async {
+    // Lifecycle callbacks can fire in quick succession (inactive, hidden, paused).
+    // Do not initialize two media queues or race volume changes.
+    if (_backgroundAudioStarting) return;
+    _backgroundAudioStarting = true;
     final resumePosition = controller.value.position;
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1638,9 +1633,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم إيقاف صوت الخلفية وإعادة صوت الفيديو.')));
         return;
       }
-      // Keep the picture moving, but mute its audio track so the background media
-      // service is the only audible source and can keep playing after the app is hidden.
-      await controller.setVolume(0.0);
+      // Keep the in-app video audible while the second player prepares. Muting it
+      // before setAudioSource completes causes the reported multi-second silence.
       if (!controller.value.isPlaying) await controller.play();
       await prefs.setInt('resume_${widget.entry.id}', resumePosition.inMilliseconds);
       final handler = await _getBackgroundAudioHandler();
@@ -1673,13 +1667,23 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         startIndex,
         startPosition: controller.value.position,
       );
+      // Do not switch audio sources until the background player confirms that it
+      // actually started. A timeout leaves the original video audio intact.
+      await handler.playbackState
+          .firstWhere((state) => state.playing)
+          .timeout(const Duration(seconds: 10));
+      await controller.setVolume(0.0);
+      debugPrint('SamirNet background audio confirmed playing; video audio muted');
       if (mounted) setState(() { _backgroundAudioActive = true; _lastVideoPlaying = controller.value.isPlaying; });
       _attachBackgroundPlaybackListener(handler);
       if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يظهر إشعار التحكم، ويمكنك استخدام السابق والتالي والتقديم والإرجاع.')));
     } catch (e) {
       try { await controller.setVolume(1.0); } catch (_) {}
       if (mounted) setState(() => _backgroundAudioActive = false);
+      debugPrint('SamirNet background audio startup failed: $e');
       if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الخلفية: $e')));
+    } finally {
+      _backgroundAudioStarting = false;
     }
   }
   Future<void> _toggleFullscreen() async {
