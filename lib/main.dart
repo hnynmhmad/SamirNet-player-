@@ -426,7 +426,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')),
         PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا')),
       ]),
-      IconButton(tooltip: 'نقل عبر Wi-Fi', onPressed: () => _toast('ميزة نقل Wi-Fi ضمن مرحلة التطوير التالية'), icon: const Icon(Icons.wifi_rounded)),
+      IconButton(tooltip: 'نقل عبر Wi-Fi', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WifiTransferScreen())), icon: const Icon(Icons.wifi_rounded)),
     ]),
     body: tab == 4 ? _settings() : tab == 1 ? _folders() : _library(),
     bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (v) => setState(() { tab = v; if (v != 0) showAllVideos = false; }), destinations: const [
@@ -1718,19 +1718,30 @@ class _VaultScreenState extends State<VaultScreen> {
     final pin = await _ensurePin();
     if (pin == null) return;
     setState(() => busy = true);
+    File? temporaryPlaintext;
     try {
-      final temp = await VaultService.instance.decryptToTemporary(file, pin);
+      temporaryPlaintext = await VaultService.instance.decryptToTemporary(file, pin);
       final meta = await VaultService.instance.metadataFor(file);
       final originalName = meta['name'] as String? ?? 'restored_media.bin';
       final destination = await FilePicker.platform.saveFile(fileName: originalName);
       if (destination != null) {
-        await temp.copy(destination);
-        await temp.delete();
+        await temporaryPlaintext.copy(destination);
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم فك التشفير وحفظ النسخة التي اخترتها')));
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر فك التشفير: $e')));
-    } finally { if (mounted) setState(() => busy = false); }
+    } finally {
+      // Decrypted media must not remain in the app's temporary directory if the
+      // user cancels the save dialog or copying fails.
+      try {
+        if (temporaryPlaintext != null && await temporaryPlaintext.exists()) {
+          await temporaryPlaintext.delete();
+        }
+      } catch (cleanupError) {
+        debugPrint('Could not remove temporary decrypted media: $cleanupError');
+      }
+      if (mounted) setState(() => busy = false);
+    }
   }
   Future<void> _delete(File file) async {
     final confirm = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
