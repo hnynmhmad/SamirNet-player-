@@ -42,8 +42,15 @@ Future<AudioHandler> _getBackgroundAudioHandler() {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Keep startup minimal and resilient; media permissions are requested after the UI appears.
+  // Register the Android media handler during app startup, as required by
+  // audio_service. Keep startup resilient: a media-service failure must not
+  // prevent the app UI from opening.
   runApp(const SamirNetApp());
+  unawaited(_getBackgroundAudioHandler().then<void>((_) {
+    debugPrint('SamirNet media session initialized');
+  }).catchError((Object error, StackTrace stack) {
+    debugPrint('SamirNet media session initialization failed: $error\n$stack');
+  }));
 }
 
 class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
@@ -172,19 +179,15 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       bufferedPosition: _player.bufferedPosition,
       queueIndex: start,
     ));
-    playbackState.add(playbackState.value.copyWith(
-      controls: const [MediaControl.skipToPrevious, MediaControl.pause, MediaControl.stop, MediaControl.skipToNext],
-      systemActions: const {MediaAction.seek, MediaAction.seekForward, MediaAction.seekBackward},
-      androidCompactActionIndices: const [0, 1, 3],
-      processingState: AudioProcessingState.ready,
-      playing: true,
-      updatePosition: _player.position,
-      bufferedPosition: _player.bufferedPosition,
-      queueIndex: start,
-    ));
+    // Start playback only after publishing the media item and a ready-but-paused
+    // state. The playbackEventStream below publishes playing=true when the
+    // underlying player actually starts, which is what Android uses to promote
+    // the media service and show its notification.
     // Do not await play(): just_audio completes this future when playback ends.
-    // Awaiting it blocked the caller, leaving the video player audible at the same time.
-    unawaited(_player.play());
+    unawaited(_player.play().catchError((Object error, StackTrace stack) {
+      debugPrint('Background audio playback failed: $error\n$stack');
+      playbackState.add(playbackState.value.copyWith(playing: false));
+    }));
   }
   @override
   Future<void> skipToNext() async {
