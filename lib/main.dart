@@ -30,6 +30,7 @@ Future<void> main() async {
   } catch (error, stack) {
     debugPrint('SamirNet media session initialization failed: $error\\n$stack');
   }
+  runApp(const SamirNetApp());
 }
 
 class SamirNetApp extends StatefulWidget {
