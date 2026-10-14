@@ -42,15 +42,15 @@ Future<AudioHandler> _getBackgroundAudioHandler() {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Register the Android media handler during app startup, as required by
-  // audio_service. Keep startup resilient: a media-service failure must not
-  // prevent the app UI from opening.
-  runApp(const SamirNetApp());
-  unawaited(_getBackgroundAudioHandler().then<void>((_) {
+  // Register the Android media handler before the UI can start playback, as
+  // recommended by audio_service. A failure must not prevent the app opening.
+  try {
+    await _getBackgroundAudioHandler();
     debugPrint('SamirNet media session initialized');
-  }).catchError((Object error, StackTrace stack) {
+  } catch (error, stack) {
     debugPrint('SamirNet media session initialization failed: $error\n$stack');
-  }));
+  }
+  runApp(const SamirNetApp());
 }
 
 class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
