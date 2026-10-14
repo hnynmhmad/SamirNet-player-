@@ -1345,6 +1345,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Warm up the Android media session while the Activity is foregrounded. This
+    // avoids waiting until the app is already backgrounded to create the service.
+    unawaited(_prepareBackgroundAudioHandler());
     _isFavorite = widget.favorite;
     _loadVideoModes();
     _playlistIndex = widget.playlist.indexWhere((e) => e.id == widget.entry.id);
@@ -1474,6 +1477,14 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (_brightnessGesture) { ScreenBrightness().setScreenBrightness(level); _showLevelOverlay('السطوع', Icons.brightness_6_rounded, level); }
     else { VolumeController().setVolume(level); _showLevelOverlay('الصوت', Icons.volume_up_rounded, level); }
   }
+  Future<void> _prepareBackgroundAudioHandler() async {
+    try {
+      await _getBackgroundAudioHandler();
+    } catch (error) {
+      debugPrint('Could not prepare background media session: $error');
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused &&
