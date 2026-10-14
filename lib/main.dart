@@ -28,9 +28,9 @@ Future<AudioHandler> _getBackgroundAudioHandler() {
     return AudioService.init(
       builder: () => SNBackgroundAudioHandler(),
       config: AudioServiceConfig(
-        androidNotificationChannelId: 'com.samirnet.player.audio',
-        androidNotificationChannelName: 'SM Player · موسيقى وفيديو',
-        androidNotificationChannelDescription: 'إشعار التحكم بتشغيل الموسيقى والفيديو في الخلفية',
+        androidNotificationChannelId: 'com.samirnet.player.audio.v2',
+        androidNotificationChannelName: 'SM Player · التحكم بالوسائط',
+        androidNotificationChannelDescription: 'إشعار التحكم بتشغيل الموسيقى والفيديو في الخلفية. القناة الجديدة تعالج إعدادات القناة القديمة.',
         androidNotificationOngoing: true,
         androidStopForegroundOnPause: false,
         androidNotificationClickStartsActivity: true,
