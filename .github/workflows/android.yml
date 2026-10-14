@@ -51,6 +51,12 @@ jobs:
           drawable = root / 'drawable'
           drawable.mkdir(parents=True, exist_ok=True)
           # Android media notifications require a dedicated small, monochrome icon.
+          raw = root / 'raw'
+          raw.mkdir(parents=True, exist_ok=True)
+          (raw / 'keep.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
+          <resources xmlns:tools="http://schemas.android.com/tools"
+              tools:keep="@drawable/ic_stat_player" />
+          ''')
           (drawable / 'ic_stat_player.xml').write_text('''<?xml version="1.0" encoding="utf-8"?>
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="24dp" android:height="24dp"
