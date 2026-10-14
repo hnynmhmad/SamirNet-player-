@@ -82,7 +82,11 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
           MediaControl.stop,
           MediaControl.skipToNext,
         ],
-        systemActions: const {MediaAction.seek},
+        systemActions: const {
+          MediaAction.seek,
+          MediaAction.seekForward,
+          MediaAction.seekBackward,
+        },
         androidCompactActionIndices: const [0, 1, 3],
         processingState: const {
           ProcessingState.idle: AudioProcessingState.idle,
@@ -98,14 +102,43 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
         queueIndex: event.currentIndex,
       ));
     });
-    _player.currentIndexStream.listen((index) {
-      if (index != null && index < queue.value.length) mediaItem.add(queue.value[index]);
-    });
-    _player.durationStream.listen((duration) {
-      final current = mediaItem.value;
-      if (duration != null && current != null) mediaItem.add(current.copyWith(duration: duration));
-    });
+    _player.currentIndexStream.listen(_publishCurrentItem);
+    _player.durationStream.listen(_publishCurrentDuration);
   }
+  void _publishCurrentItem(int? index) {
+    if (index == null || index < 0 || index >= queue.value.length) return;
+    final queuedItem = queue.value[index];
+    final currentItem = mediaItem.value;
+    final knownDuration = _player.duration ??
+        (currentItem?.id == queuedItem.id ? currentItem?.duration : null) ??
+        queuedItem.duration;
+    final updatedItem = queuedItem.copyWith(duration: knownDuration);
+    final updatedQueue = List<MediaItem>.from(queue.value);
+    updatedQueue[index] = updatedItem;
+    queue.add(updatedQueue);
+    mediaItem.add(updatedItem);
+  }
+
+  void _publishCurrentDuration(Duration? duration) {
+    if (duration == null) return;
+    final index = _player.currentIndex ?? playbackState.value.queueIndex;
+    if (index == null || index < 0 || index >= queue.value.length) {
+      final current = mediaItem.value;
+      if (current != null) mediaItem.add(current.copyWith(duration: duration));
+      return;
+    }
+    final queuedItem = queue.value[index];
+    final currentItem = mediaItem.value;
+    final baseItem = currentItem != null && currentItem.id == queuedItem.id
+        ? currentItem
+        : queuedItem;
+    final updatedItem = baseItem.copyWith(duration: duration);
+    final updatedQueue = List<MediaItem>.from(queue.value);
+    updatedQueue[index] = updatedItem;
+    queue.add(updatedQueue);
+    mediaItem.add(updatedItem);
+  }
+
   Future<void> playFileInBackground(File file, String title, {Duration startPosition = Duration.zero}) async {
     await playQueueInBackground([file], [title], 0, startPosition: startPosition);
   }
@@ -126,10 +159,10 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     // Publish duration only after the source is prepared. The duration stream may
     // emit before mediaItem is set, which previously left the UI and media session
     // with a zero/unknown duration and a seek bar stuck at the start.
-    final preparedDuration = _player.duration;
-    if (preparedDuration != null) {
-      mediaItem.add(items[start].copyWith(duration: preparedDuration));
-    }
+    // Publish the current track after the source is ready. Duration events can
+    // arrive before or after currentIndexStream, so both paths update the item.
+    _publishCurrentItem(start);
+    _publishCurrentDuration(_player.duration);
     playbackState.add(playbackState.value.copyWith(
       controls: const [
         MediaControl.skipToPrevious,
@@ -1158,7 +1191,7 @@ class _MusicPlayerScreenState extends State<MusicPlayerScreen> with SingleTicker
             onChanged: (v) => setState(() => _dragPosition = v),
             onChangeEnd: (v) { widget.handler.seek(Duration(milliseconds: v.round())); setState(() => _dragPosition = null); },
           )),
-          Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(_time(position), style: const TextStyle(color: Colors.white54, fontSize: 12)), Text('-${_time(duration > position ? duration - position : Duration.zero)}', style: const TextStyle(color: Colors.white54, fontSize: 12))])),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(_time(position), style: const TextStyle(color: Colors.white54, fontSize: 12)), Text(_time(duration), style: const TextStyle(color: Colors.white54, fontSize: 12))])),
           const SizedBox(height: 20),
           Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
             IconButton(tooltip: _shuffle ? 'العشوائي مفعّل' : 'تشغيل عشوائي', onPressed: _toggleShuffle, style: IconButton.styleFrom(backgroundColor: _shuffle ? coral.withOpacity(.22) : Colors.transparent), color: _shuffle ? coral : Colors.white70, icon: const Icon(Icons.shuffle_rounded)),
@@ -1286,7 +1319,7 @@ class PlayerScreen extends StatefulWidget {
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
-class _PlayerScreenState extends State<PlayerScreen> {
+class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver {
   late final VideoPlayerController controller;
   bool ready = false, controls = true, locked = false, fillScreen = false, _longPressActive = false, _backgroundAudioActive = false;
   bool _isFavorite = false, _repeat = false, _shuffle = false;
@@ -1311,6 +1344,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _isFavorite = widget.favorite;
     _loadVideoModes();
     _playlistIndex = widget.playlist.indexWhere((e) => e.id == widget.entry.id);
@@ -1440,14 +1474,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_brightnessGesture) { ScreenBrightness().setScreenBrightness(level); _showLevelOverlay('السطوع', Icons.brightness_6_rounded, level); }
     else { VolumeController().setVolume(level); _showLevelOverlay('الصوت', Icons.volume_up_rounded, level); }
   }
-  Future<void> _startBackgroundAudio() async {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused &&
+        mounted &&
+        controller.value.isInitialized &&
+        controller.value.isPlaying &&
+        !_backgroundAudioActive) {
+      // Start the media session while the video is still playing so Android can
+      // keep audio alive and expose notification controls after Home is pressed.
+      unawaited(_startBackgroundAudio(showFeedback: false));
+    }
+  }
+
+  Future<void> _startBackgroundAudio({bool showFeedback = true}) async {
     final resumePosition = controller.value.position;
     try {
       final prefs = await SharedPreferences.getInstance();
       final mode = prefs.getString('background_mode') ?? 'audio';
       if (mode == 'pip') {
         final result = await const MethodChannel('com.samirnet.snplayer/pip').invokeMethod<bool>('enterPip');
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result == true ? 'تم طلب نافذة الفيديو العائمة.' : 'تعذر تشغيل النافذة العائمة؛ تحقق من دعم Picture-in-Picture في Android.')));
+        if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result == true ? 'تم طلب نافذة الفيديو العائمة.' : 'تعذر تشغيل النافذة العائمة؛ تحقق من دعم Picture-in-Picture في Android.')));
         return;
       }
       if (_backgroundAudioActive) {
@@ -1457,7 +1504,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await handler.stop();
         await controller.setVolume(1.0);
         if (mounted) setState(() { _backgroundAudioActive = false; _lastVideoPlaying = null; });
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم إيقاف صوت الخلفية وإعادة صوت الفيديو.')));
+        if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم إيقاف صوت الخلفية وإعادة صوت الفيديو.')));
         return;
       }
       // Keep the picture moving, but mute its audio track so the background media
@@ -1471,17 +1518,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
       await _backgroundPlaybackSub?.cancel();
       _backgroundPlaybackSub = handler.playbackState.listen((state) async {
         if (!_backgroundAudioActive || !mounted || !controller.value.isInitialized) return;
+        final positionDelta =
+            (state.position - controller.value.position).inMilliseconds.abs();
+        if (positionDelta > 1800 && !_syncingBackgroundAudio) {
+          _syncingBackgroundAudio = true;
+          _lastBackgroundSync = DateTime.now();
+          try {
+            // Seeking from the Android notification must move the visible video too.
+            await controller.seekTo(state.position);
+          } finally {
+            _syncingBackgroundAudio = false;
+          }
+        }
         if (state.playing && !controller.value.isPlaying) {
           await controller.play();
         } else if (!state.playing && controller.value.isPlaying) {
           await controller.pause();
         }
       });
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يستمر الفيديو بصورته، ويظهر إشعار التحكم عند تشغيل الصوت. اضغط الزر مرة أخرى لإيقافه.')));
+      if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يستمر الفيديو بصورته، ويظهر إشعار التحكم عند تشغيل الصوت. اضغط الزر مرة أخرى لإيقافه.')));
     } catch (e) {
       try { await controller.setVolume(1.0); } catch (_) {}
       if (mounted) setState(() => _backgroundAudioActive = false);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الخلفية: $e')));
+      if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الخلفية: $e')));
     }
   }
   Future<void> _toggleFullscreen() async {
@@ -1529,6 +1588,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
     _overlayTimer?.cancel();
     _backgroundPlaybackSub?.cancel();
