@@ -1649,7 +1649,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         startIndex,
         startPosition: controller.value.position,
       );
-      if (mounted) setState(() { _backgroundAudioActive = true; _lastVideoPlaying = controller.value.isPlaying; _lastBackgroundSync = DateTime.now(); });
+      if (mounted) setState(() { _backgroundAudioActive = true; _lastVideoPlaying = controller.value.isPlaying; });
       _attachBackgroundPlaybackListener(handler);
       if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يظهر إشعار التحكم، ويمكنك استخدام السابق والتالي والتقديم والإرجاع.')));
     } catch (e) {
