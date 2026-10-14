@@ -19,8 +19,8 @@ import 'services/wifi_transfer_service.dart';
 const coral = Color(0xFFEF4444);
 const ink = Color(0xFF111827);
 
-// Background audio is optional. Do not initialize its Android service during app startup:
-// a service/notification configuration problem must never prevent the main UI from opening.
+// Register the media service before playback can start. Initialization errors are
+// caught in main() so a notification issue never prevents the main UI from opening.
 Future<AudioHandler>? _backgroundAudioHandlerFuture;
 
 Future<AudioHandler> _getBackgroundAudioHandler() {
