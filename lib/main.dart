@@ -34,7 +34,7 @@ Future<AudioHandler> _getBackgroundAudioHandler() {
         androidNotificationOngoing: true,
         androidStopForegroundOnPause: false,
         androidNotificationClickStartsActivity: true,
-        androidNotificationIcon: 'mipmap/ic_launcher',
+        androidNotificationIcon: 'drawable/ic_stat_player',
       ),
     );
   })();
@@ -331,8 +331,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
   void initState() {
     super.initState();
     _loadLocal();
-    _scan();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _requestFirstRunPermissions());
+    // Ask for notification permission before requesting media-library access.
+    // Two permission dialogs started together can cause Android to suppress one.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _requestFirstRunPermissions();
+      if (mounted) await _scan();
+    });
   }
   Future<void> _requestFirstRunPermissions() async {
     final prefs = await SharedPreferences.getInstance();
@@ -351,14 +355,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
         await prefs.setBool('first_run_notifications_requested_v2', true);
       }
     }
-    if (prefs.getBool('first_run_all_files_prompted') != true && Platform.isAndroid) {
-      try {
-        await const MethodChannel('com.samirnet.snplayer/notifications').invokeMethod<bool>('requestAllFilesAccess');
-      } catch (error) {
-        debugPrint('All-files access settings unavailable: $error');
-      }
-      await prefs.setBool('first_run_all_files_prompted', true);
-    }
+    // Do not open Android's All files access Settings automatically here.
+    // That external screen can interrupt the notification permission dialog.
+    // Storage/media permissions are requested by the relevant library screen.
   }
   @override
   void dispose() { search.dispose(); super.dispose(); }
