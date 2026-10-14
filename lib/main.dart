@@ -125,7 +125,7 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
   }
   SNBackgroundAudioHandler() {
     Timer.periodic(const Duration(milliseconds: 250), (_) {
-      if (_player.playing) {
+      if (_backgroundQueueActive && _player.playing) {
         playbackState.add(playbackState.value.copyWith(
           updatePosition: _player.position,
           bufferedPosition: _player.bufferedPosition,
@@ -135,6 +135,7 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       }
     });
     _player.positionStream.listen((position) {
+      if (!_backgroundQueueActive) return;
       playbackState.add(playbackState.value.copyWith(
         updatePosition: position,
         bufferedPosition: _player.bufferedPosition,
@@ -146,6 +147,7 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     // command because the playing flag is a separate stream. Publish that flag
     // independently so audio_service can reliably enter Android foreground mode.
     _player.playingStream.listen((playing) {
+      if (!_backgroundQueueActive) return;
       debugPrint('SamirNet playingStream: playing=$playing');
       playbackState.add(playbackState.value.copyWith(
         playing: playing,
@@ -155,6 +157,7 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       ));
     });
     _player.playbackEventStream.listen((event) {
+      if (!_backgroundQueueActive) return;
       final playing = _player.playing;
       playbackState.add(playbackState.value.copyWith(
         controls: [
@@ -183,8 +186,12 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
         queueIndex: event.currentIndex,
       ));
     });
-    _player.currentIndexStream.listen(_publishCurrentItem);
-    _player.durationStream.listen(_publishCurrentDuration);
+    _player.currentIndexStream.listen((index) {
+      if (_backgroundQueueActive) _publishCurrentItem(index);
+    });
+    _player.durationStream.listen((duration) {
+      if (_backgroundQueueActive) _publishCurrentDuration(duration);
+    });
   }
   void _publishCurrentItem(int? index) {
     if (index == null || index < 0 || index >= queue.value.length) return;
