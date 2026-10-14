@@ -1380,12 +1380,14 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         await controller.play();
         await _loadBackgroundQueueEntries(handler);
         _lastBackgroundQueueIndex = activeState.queueIndex;
-        if (mounted) setState(() {
-          ready = true;
-          _backgroundAudioActive = true;
-          _lastVideoPlaying = true;
-          _lastBackgroundSync = DateTime.now();
-        });
+        if (mounted) {
+          setState(() {
+            ready = true;
+            _backgroundAudioActive = true;
+            _lastVideoPlaying = true;
+            _lastBackgroundSync = DateTime.now();
+          });
+        }
         _attachBackgroundPlaybackListener(handler);
       } else {
         await controller.play();
@@ -1738,7 +1740,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   Widget build(BuildContext context) {
     final v = controller.value;
     return Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTap: () {}, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, onLongPressStart: locked ? null : _beginSpeedBoost, onLongPressEnd: locked ? null : (_) => _endSpeedBoost(), onHorizontalDragStart: locked ? null : _horizontalSeekStart, onHorizontalDragUpdate: locked ? null : _horizontalSeekUpdate, onHorizontalDragEnd: (_) => _gestureStart = null, onVerticalDragStart: locked ? null : _gestureStartAt, onVerticalDragUpdate: locked ? null : _gestureUpdate, onVerticalDragEnd: (_) => _gestureStart = null, child: Stack(alignment: Alignment.center, children: [
-      if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: VideoPlayer(controller)))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: VideoPlayer(controller))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
+      if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: VideoPlayer(controller))))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: VideoPlayer(controller)))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
       if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),
       if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
         Row(children: [
