@@ -1343,7 +1343,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   int? _pendingBackgroundQueueIndex;
   DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
   bool? _lastVideoPlaying;
-  DateTime _lastBackgroundSync = DateTime.fromMillisecondsSinceEpoch(0);
   bool _syncingBackgroundAudio = false;
   @override
   void initState() {
@@ -1386,7 +1385,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
             ready = true;
             _backgroundAudioActive = true;
             _lastVideoPlaying = true;
-            _lastBackgroundSync = DateTime.now();
           });
         }
         _attachBackgroundPlaybackListener(handler);
@@ -1563,7 +1561,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
           (state.position - controller.value.position).inMilliseconds.abs();
       if (positionDelta > 1800 && !_syncingBackgroundAudio) {
         _syncingBackgroundAudio = true;
-        _lastBackgroundSync = DateTime.now();
         try {
           // Seeking from the Android notification must move the visible video too.
           await controller.seekTo(state.position);
