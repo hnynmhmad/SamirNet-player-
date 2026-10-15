@@ -34,7 +34,7 @@ class WifiTransferService {
   Future<void> start() async {
     if (_server != null) return;
     final docs = await getApplicationDocumentsDirectory();
-    _inbox = Directory('${docs.path}/wifi_received');
+    _inbox = Directory('${docs.path}/SM Player');
     if (!await _inbox!.exists()) await _inbox!.create(recursive: true);
     _token = _newToken();
     _server = await HttpServer.bind(InternetAddress.anyIPv4, 0, shared: false);
