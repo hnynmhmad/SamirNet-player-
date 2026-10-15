@@ -142,7 +142,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       final safeName = name
           .split(RegExp(r'[/\\\\]'))
           .last
-          .replaceAll(RegExp(r'[\\x00-\\x1F\\x7F]'), '_')
+          .replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '_')
           .trim();
       final finalName = safeName.isEmpty || safeName == '.' || safeName == '..'
           ? 'received_$payloadId.bin'
