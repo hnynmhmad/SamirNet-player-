@@ -156,7 +156,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       }
       await _nearby.copyFileAndDeleteOriginal(sourceUri, destination);
       _incomingNames.remove(payloadId);
-      if (mounted) setState(() => _status = 'تم استلام وحفظ ${finalName}');
+      if (mounted) setState(() => _status = 'تم استلام وحفظ $finalName');
     } finally {
       _savingPayloads.remove(payloadId);
     }
