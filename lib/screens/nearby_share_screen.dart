@@ -233,6 +233,9 @@ class _ReceiveScreenState extends State<_ReceiveScreen> {
             const SizedBox(height: 8),
             SelectableText('http://$ip:${_service.port}',
                 textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            const Text('رمز الاتصال البديل', style: TextStyle(fontWeight: FontWeight.bold)),
+            SelectableText(_service.token ?? '', textAlign: TextAlign.center),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: _busy ? null : _stop,
@@ -335,9 +338,43 @@ class _SendScreenState extends State<_SendScreen> {
     }
   }
 
-  Future<void> _scanAndSend() async {
+  Future<String?> _enterConnectionDetails() async {
+    final address = TextEditingController();
+    final token = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('الاتصال دون QR'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('أدخل عنوان جهاز الاستقبال ورمز الاتصال الظاهر على هاتف صديقك.'),
+            const SizedBox(height: 12),
+            TextField(controller: address, decoration: const InputDecoration(labelText: 'العنوان (مثل http://192.168.1.5:12345)', border: OutlineInputBorder()), keyboardType: TextInputType.url),
+            const SizedBox(height: 10),
+            TextField(controller: token, decoration: const InputDecoration(labelText: 'رمز الاتصال', border: OutlineInputBorder()), autocorrect: false),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('إلغاء')),
+          FilledButton(onPressed: () {
+            final url = address.text.trim();
+            final secret = token.text.trim();
+            if (url.isNotEmpty && secret.isNotEmpty) {
+              Navigator.pop(dialogContext, jsonEncode({'app': 'SMPlayerShare', 'version': 1, 'url': url, 'token': secret}));
+            }
+          }, child: const Text('اتصال')),
+        ],
+      ),
+    );
+    address.dispose();
+    token.dispose();
+    return result;
+  }
+
+  Future<void> _scanAndSend({bool manual = false}) async {
     if (_files.isEmpty || _busy) return;
-    final data = await Navigator.push<String>(
+    final data = manual ? await _enterConnectionDetails() : await Navigator.push<String>(
       context,
       MaterialPageRoute(builder: (_) => const _ScanReceiverScreen()),
     );
@@ -525,6 +562,19 @@ class _SendScreenState extends State<_SendScreen> {
                     onPressed: _busy || _files.isEmpty ? null : _scanAndSend,
                     icon: const Icon(Icons.qr_code_scanner_rounded),
                     label: const Text('مسح رمز جهاز الاستقبال والإرسال'),
+                  ),
+                ),
+              ),
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _busy || _files.isEmpty ? null : () => _scanAndSend(manual: true),
+                    icon: const Icon(Icons.link_rounded),
+                    label: const Text('الاتصال دون QR'),
                   ),
                 ),
               ),
