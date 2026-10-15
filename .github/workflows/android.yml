@@ -441,6 +441,40 @@ jobs:
                   raise SystemExit('Missing media permission: ' + permission)
           print('Verified Android media permissions, manifest XML, and SM Player label')
           PY
+      - name: Configure nearby file-sharing permissions and local HTTP
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import xml.etree.ElementTree as ET
+
+          path = Path('android/app/src/main/AndroidManifest.xml')
+          text = path.read_text()
+          for permission in [
+              'android.permission.CAMERA',
+              'android.permission.INTERNET',
+              'android.permission.ACCESS_NETWORK_STATE',
+          ]:
+              if permission not in text:
+                  text = text.replace('<application', f'<uses-permission android:name="{permission}" />\\n    <application', 1)
+          pattern = r'(<application\\b[^>]*)(>)'
+          def update_application(match):
+              tag = match.group(1)
+              if 'android:usesCleartextTraffic=' not in tag:
+                  tag += ' android:usesCleartextTraffic="true"'
+              return tag + match.group(2)
+          text, count = re.subn(pattern, update_application, text, count=1)
+          if count != 1:
+              raise SystemExit('Could not safely configure Android application networking')
+          path.write_text(text)
+          ET.parse(path)
+          saved = path.read_text()
+          for permission in ['android.permission.CAMERA', 'android.permission.INTERNET', 'android.permission.ACCESS_NETWORK_STATE']:
+              if permission not in saved:
+                  raise SystemExit('Missing nearby-sharing permission: ' + permission)
+          print('Verified camera, network, and local HTTP manifest settings.')
+          PY
       - name: Resolve dependencies
         run: flutter pub get
       - name: Normalize Android plugin compile SDK versions
