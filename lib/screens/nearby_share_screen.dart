@@ -318,10 +318,10 @@ class _SendScreenState extends State<_SendScreen> {
           if (!_files.any((old) => old.path == file.path)) _files.add(file);
         }
         _error = null;
-        _status = picked.isEmpty ? 'لم يتم اختيار ${label}' : 'تمت إضافة ${picked.length} ملف';
+        _status = picked.isEmpty ? 'لم يتم اختيار $label' : 'تمت إضافة ${picked.length} ملف';
       });
     } catch (e) {
-      if (mounted) setState(() => _error = 'تعذر اختيار ${label}: $e');
+      if (mounted) setState(() => _error = 'تعذر اختيار $label: $e');
     }
   }
 
