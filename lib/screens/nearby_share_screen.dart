@@ -565,6 +565,7 @@ class _SendScreenState extends State<_SendScreen> {
                   ),
                 ),
               ),
+            ),
             SafeArea(
               top: false,
               child: Padding(
