@@ -49,6 +49,8 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
   String? _foregroundVideoId;
   String? _foregroundVideoTitle;
   bool _backgroundQueueActive = false;
+  List<String>? _preparedQueuePaths;
+  List<String>? _preparedQueueTitles;
   Duration _lastForegroundPosition = Duration.zero;
   bool? _lastForegroundPlaying;
 
@@ -217,6 +219,45 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     mediaItem.add(updatedItem);
   }
 
+  Future<void> prepareQueueForBackground(List<File> files, List<String> titles) async {
+    if (_backgroundQueueActive || files.isEmpty || files.length != titles.length) return;
+    final paths = files.map((file) => file.path).toList(growable: false);
+    if (_preparedQueuePaths != null &&
+        listEquals(_preparedQueuePaths, paths) &&
+        listEquals(_preparedQueueTitles, titles) &&
+        _player.processingState != ProcessingState.idle) {
+      return;
+    }
+    // Preload the local video audio tracks while the video is still playing in
+    // the foreground. Tapping the background button can then start immediately
+    // instead of waiting several seconds for ExoPlayer to open every file.
+    await _player.pause();
+    await _player.setAudioSource(
+      ConcatenatingAudioSource(
+        children: files.map((file) => AudioSource.file(file.path)).toList(),
+      ),
+      initialIndex: 0,
+    );
+    _preparedQueuePaths = paths;
+    _preparedQueueTitles = List<String>.from(titles);
+  }
+
+  Future<bool> selectQueueItemByPath(String path, {Duration position = Duration.zero}) async {
+    if (!_backgroundQueueActive) return false;
+    final index = queue.value.indexWhere((item) => item.id == path);
+    if (index < 0) return false;
+    await _player.seek(position, index: index);
+    _publishCurrentItem(index);
+    _publishCurrentDuration(_player.duration);
+    playbackState.add(playbackState.value.copyWith(
+      playing: _player.playing,
+      updatePosition: _player.position,
+      bufferedPosition: _player.bufferedPosition,
+      queueIndex: index,
+    ));
+    return true;
+  }
+
   Future<void> playFileInBackground(File file, String title, {Duration startPosition = Duration.zero}) async {
     await playQueueInBackground([file], [title], 0, startPosition: startPosition);
   }
@@ -224,6 +265,12 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     if (files.isEmpty || files.length != titles.length) {
       throw ArgumentError('The music queue is empty or invalid');
     }
+    final paths = files.map((file) => file.path).toList(growable: false);
+    final canReusePreparedQueue =
+        _preparedQueuePaths != null &&
+        listEquals(_preparedQueuePaths, paths) &&
+        listEquals(_preparedQueueTitles, titles) &&
+        _player.processingState != ProcessingState.idle;
     _backgroundQueueActive = true;
     _foregroundVideoController = null;
     _foregroundVideoId = null;
@@ -233,11 +280,17 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     final start = initialIndex.clamp(0, files.length - 1).toInt();
     queue.add(items);
     mediaItem.add(items[start]);
-    await _player.setAudioSource(
-      ConcatenatingAudioSource(children: files.map((file) => AudioSource.file(file.path)).toList()),
-      initialIndex: start,
-    );
-    if (startPosition > Duration.zero) await _player.seek(startPosition, index: start);
+    if (canReusePreparedQueue) {
+      await _player.seek(startPosition, index: start);
+    } else {
+      await _player.setAudioSource(
+        ConcatenatingAudioSource(children: files.map((file) => AudioSource.file(file.path)).toList()),
+        initialIndex: start,
+      );
+      if (startPosition > Duration.zero) await _player.seek(startPosition, index: start);
+      _preparedQueuePaths = paths;
+      _preparedQueueTitles = List<String>.from(titles);
+    }
     // Publish duration only after the source is prepared. The duration stream may
     // emit before mediaItem is set, which previously left the UI and media session
     // with a zero/unknown duration and a seek bar stuck at the start.
