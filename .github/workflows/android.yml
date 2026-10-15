@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/offline-nearby-sharing]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -516,6 +516,29 @@ jobs:
           PY
       - name: Resolve dependencies
         run: flutter pub get
+      - name: Verify nearby-sharing source files and declared dependencies
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          pubspec = Path('pubspec.yaml').read_text()
+          required = ['mobile_scanner', 'qr_flutter', 'nearby_connections', 'app_settings', 'file_picker', 'path_provider']
+          missing = [name for name in required if not re.search(r'^  ' + re.escape(name) + r':', pubspec, re.M)]
+          files = [
+              Path('lib/screens/nearby_share_screen.dart'),
+              Path('lib/screens/nearby_devices_screen.dart'),
+              Path('lib/services/wifi_transfer_service.dart'),
+          ]
+          missing_files = [str(path) for path in files if not path.is_file()]
+          if missing or missing_files:
+              if missing:
+                  print('Missing pubspec dependencies: ' + ', '.join(missing))
+              if missing_files:
+                  print('Missing required source files: ' + ', '.join(missing_files))
+              raise SystemExit('Nearby-sharing source preflight failed')
+          print('Verified nearby-sharing dependencies and source files.')
+          PY
       - name: Normalize Android plugin compile SDK versions
         shell: bash
         run: |
