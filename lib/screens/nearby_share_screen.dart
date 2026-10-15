@@ -618,7 +618,7 @@ class _ScanReceiverScreenState extends State<_ScanReceiverScreen> {
         body: Stack(
           children: [
             MobileScanner(
-              errorBuilder: (context, error) => Center(
+              errorBuilder: (context, error, child) => Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
                   child: Column(
