@@ -7,6 +7,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../services/wifi_transfer_service.dart';
+import 'nearby_devices_screen.dart';
 
 const _shareRed = Color(0xFFEF4444);
 const _shareBlue = Color(0xFF3979D5);
@@ -72,6 +73,24 @@ class NearbyShareScreen extends StatelessWidget {
                 subtitle: 'اعرض رمز QR ليقوم صديقك بمسحه',
                 onTap: () => Navigator.push(context,
                     MaterialPageRoute(builder: (_) => const _ReceiveScreen())),
+              ),
+              const SizedBox(height: 14),
+              _ActionCard(
+                color: const Color(0xFF16866A),
+                background: const Color(0xFFE1F5ED),
+                icon: Icons.radar_rounded,
+                title: 'الأجهزة القريبة — إرسال مباشر',
+                subtitle: 'اكتشاف تلقائي ونقل دون إنترنت',
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen(receiveMode: false))),
+              ),
+              const SizedBox(height: 14),
+              _ActionCard(
+                color: const Color(0xFF3979D5),
+                background: const Color(0xFFE4EEFC),
+                icon: Icons.phonelink_ring_rounded,
+                title: 'استلام من جهاز قريب',
+                subtitle: 'اجعل هاتفك ظاهرًا للأجهزة القريبة',
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen(receiveMode: true))),
               ),
               const SizedBox(height: 18),
               const ListTile(
