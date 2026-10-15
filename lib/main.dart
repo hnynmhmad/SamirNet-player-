@@ -19,6 +19,9 @@ import 'services/media_session_service.dart';
 const coral = Color(0xFFEF4444);
 const ink = Color(0xFF111827);
 
+// Keeps the user's video-background choice when the player navigates to another video.
+bool _videoBackgroundModeEnabled = false;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Initialize the media session before any screen can begin playback.
@@ -1181,22 +1184,47 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       final handler = await getBackgroundAudioHandler();
       final activeItem = handler.mediaItem.value;
       final activeState = handler.playbackState.value;
-      if (activeState.playing && activeItem?.id == widget.file.path) {
-        await controller.setVolume(0.0);
-        if (activeState.position > Duration.zero) {
-          await controller.seekTo(activeState.position);
+      if (_videoBackgroundModeEnabled &&
+          handler is SNBackgroundAudioHandler &&
+          handler.queue.value.any((item) => item.id == widget.file.path)) {
+        // Keep background mode active across manual and notification-driven
+        // navigation, even if the previous video was paused.
+        if (activeItem?.id != widget.file.path) {
+          await handler.selectQueueItemByPath(widget.file.path);
         }
-        await controller.play();
-        await _loadBackgroundQueueEntries(handler);
-        _lastBackgroundQueueIndex = activeState.queueIndex;
-        if (mounted) {
-          setState(() {
-            ready = true;
-            _backgroundAudioActive = true;
-            _lastVideoPlaying = true;
-          });
+        final currentState = handler.playbackState.value;
+        final currentItem = handler.mediaItem.value;
+        if (currentItem?.id == widget.file.path) {
+          await controller.setVolume(0.0);
+          if (currentState.position > Duration.zero) {
+            await controller.seekTo(currentState.position);
+          }
+          if (currentState.playing) {
+            await controller.play();
+          } else {
+            await controller.pause();
+          }
+          await _loadBackgroundQueueEntries(handler);
+          _lastBackgroundQueueIndex = currentState.queueIndex;
+          if (mounted) {
+            setState(() {
+              ready = true;
+              _backgroundAudioActive = true;
+              _lastVideoPlaying = currentState.playing;
+            });
+          }
+          _attachBackgroundPlaybackListener(handler);
+        } else {
+          await controller.play();
+          _foregroundHandler = handler;
+          _foregroundHandler!.bindForegroundVideo(
+            controller,
+            id: widget.file.path,
+            title: widget.entry.name,
+          );
+          if (mounted) setState(() => ready = true);
+          unawaited(_prepareVideoBackgroundQueue(handler));
         }
-        _attachBackgroundPlaybackListener(handler);
       } else {
         await controller.play();
         _foregroundHandler = handler as SNBackgroundAudioHandler;
@@ -1206,6 +1234,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
           title: widget.entry.name,
         );
         if (mounted) setState(() => ready = true);
+        unawaited(_prepareVideoBackgroundQueue(handler));
       }
       _scheduleHide();
     }).catchError((Object error) {
@@ -1322,6 +1351,33 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     }
   }
 
+  Future<void> _prepareVideoBackgroundQueue(AudioHandler handler) async {
+    if (_videoBackgroundModeEnabled || handler is! SNBackgroundAudioHandler) return;
+    // Only preload when the media session belongs to this foreground video.
+    // Never replace an unrelated audio queue while it is playing.
+    if (handler.mediaItem.value?.id != 'foreground:${widget.file.path}') return;
+    try {
+      final files = <File>[];
+      final titles = <String>[];
+      for (final entry in widget.playlist) {
+        final file = entry.id == widget.entry.id ? widget.file : await entry.asset.file;
+        if (file == null) continue;
+        files.add(file);
+        titles.add(entry.name);
+      }
+      if (!files.any((file) => file.path == widget.file.path)) {
+        files.add(widget.file);
+        titles.add(widget.entry.name);
+      }
+      await handler.prepareQueueForBackground(files, titles);
+      debugPrint('SamirNet video background queue preloaded: ${files.length} files');
+    } catch (error) {
+      // The foreground video remains audible; activation can still load the queue
+      // on demand if preloading failed.
+      debugPrint('SamirNet background queue preload failed: $error');
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && _pendingBackgroundQueueIndex != null) {
@@ -1422,6 +1478,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         return;
       }
       if (_backgroundAudioActive) {
+        _videoBackgroundModeEnabled = false;
         await _backgroundPlaybackSub?.cancel();
         _backgroundPlaybackSub = null;
         final handler = await getBackgroundAudioHandler();
@@ -1483,10 +1540,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
           .timeout(const Duration(seconds: 10));
       await controller.setVolume(0.0);
       debugPrint('SamirNet background audio confirmed playing; video audio muted');
+      _videoBackgroundModeEnabled = true;
       if (mounted) setState(() { _backgroundAudioActive = true; _lastVideoPlaying = controller.value.isPlaying; });
       _attachBackgroundPlaybackListener(handler);
       if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يظهر إشعار التحكم، ويمكنك استخدام السابق والتالي والتقديم والإرجاع.')));
     } catch (e) {
+      _videoBackgroundModeEnabled = false;
       try { await controller.setVolume(1.0); } catch (_) {}
       try {
         final handler = await getBackgroundAudioHandler();
@@ -1587,7 +1646,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       }));
     }
   }
-  void _navigatePlaylist(int direction, {bool randomize = false}) {
+  Future<void> _navigatePlaylist(int direction, {bool randomize = false}) async {
     if (widget.playlist.length < 2) return;
     final int nextIndex;
     if (randomize || _shuffle) {
@@ -1596,7 +1655,42 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     } else {
       nextIndex = (_playlistIndex + direction + widget.playlist.length) % widget.playlist.length;
     }
-    widget.onNavigate(widget.playlist[nextIndex]);
+    final nextEntry = widget.playlist[nextIndex];
+
+    if (_videoBackgroundModeEnabled && _backgroundAudioActive) {
+      try {
+        final nextFile = nextEntry.id == widget.entry.id ? widget.file : await nextEntry.asset.file;
+        final handler = await getBackgroundAudioHandler();
+        if (nextFile != null && handler is SNBackgroundAudioHandler) {
+          // Stop the old screen's listener before changing the queue index so it
+          // cannot issue a duplicate navigation while the next screen is opening.
+          await _backgroundPlaybackSub?.cancel();
+          _backgroundPlaybackSub = null;
+          final switched = await handler.selectQueueItemByPath(nextFile.path);
+          if (!switched) {
+            final files = <File>[];
+            final titles = <String>[];
+            var targetIndex = 0;
+            for (final entry in widget.playlist) {
+              final file = entry.id == widget.entry.id ? widget.file : await entry.asset.file;
+              if (file == null) continue;
+              if (file.path == nextFile.path) targetIndex = files.length;
+              files.add(file);
+              titles.add(entry.name);
+            }
+            if (!files.any((file) => file.path == nextFile.path)) {
+              targetIndex = files.length;
+              files.add(nextFile);
+              titles.add(nextEntry.name);
+            }
+            await handler.playQueueInBackground(files, titles, targetIndex);
+          }
+        }
+      } catch (error) {
+        debugPrint('SamirNet could not switch the background queue to the next video: $error');
+      }
+    }
+    widget.onNavigate(nextEntry);
   }
   Future<void> _toggleRepeat() async {
     final next = !_repeat;
