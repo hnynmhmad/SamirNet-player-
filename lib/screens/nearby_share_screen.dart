@@ -280,7 +280,7 @@ class _ReceiveScreenState extends State<_ReceiveScreen> {
           const ListTile(
             leading: Icon(Icons.folder_outlined),
             title: Text('مكان حفظ الملفات'),
-            subtitle: Text('مجلد التطبيق: wifi_received'),
+            subtitle: Text('مجلد التطبيق: SM Player'),
           ),
           const ListTile(
             leading: Icon(Icons.info_outline),
@@ -618,6 +618,23 @@ class _ScanReceiverScreenState extends State<_ScanReceiverScreen> {
         body: Stack(
           children: [
             MobileScanner(
+              errorBuilder: (context, error) => Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.camera_alt_outlined, size: 48, color: Colors.white),
+                      const SizedBox(height: 12),
+                      Text(
+                        'تعذر تشغيل الكاميرا: ${error.errorCode.name}. تأكد من منح إذن الكاميرا وإغلاق أي تطبيق يستخدمها، ثم أعد فتح الماسح.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               onDetect: (capture) {
                 if (_handled) return;
                 for (final barcode in capture.barcodes) {
