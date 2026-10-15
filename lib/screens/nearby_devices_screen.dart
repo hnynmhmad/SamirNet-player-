@@ -25,6 +25,8 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final Map<String, String> _devices = {};
   final Set<String> _connected = {};
   final Map<int, String> _incomingNames = {};
+  final Map<int, String> _pendingIncomingUris = {};
+  final Set<int> _savingPayloads = {};
   List<File> _files = [];
   bool _running = false;
   bool _busy = false;
@@ -101,21 +103,62 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       if (payload.type == PayloadType.BYTES && payload.bytes != null) {
         final text = utf8.decode(payload.bytes!, allowMalformed: true);
         if (text.startsWith('SMFILE:')) {
-          final parts = text.substring(7).split(':');
-          if (parts.length >= 2) _incomingNames[int.tryParse(parts.first) ?? -1] = parts.sublist(1).join(':');
+          final separator = text.indexOf(':', 7);
+          if (separator > 7 && separator < text.length - 1) {
+            final id = int.tryParse(text.substring(7, separator));
+            final name = text.substring(separator + 1);
+            if (id != null && name.isNotEmpty) {
+              _incomingNames[id] = name;
+              final pendingUri = _pendingIncomingUris.remove(id);
+              if (pendingUri != null) {
+                await _saveIncomingFile(id, pendingUri, name);
+              }
+            }
+          }
         }
       } else if (payload.type == PayloadType.FILE && payload.uri != null) {
-        final docs = await getApplicationDocumentsDirectory();
-        final folder = Directory('${docs.path}/wifi_received');
-        if (!await folder.exists()) await folder.create(recursive: true);
-        final name = _incomingNames.remove(payload.id) ?? 'received_${payload.id}.bin';
-        final safeName = name.split(RegExp(r'[/\\\\]')).last.replaceAll(RegExp(r'[^A-Za-z0-9._ -]'), '_');
-        final destination = '${folder.path}/${DateTime.now().millisecondsSinceEpoch}_$safeName';
-        await _nearby.copyFileAndDeleteOriginal(payload.uri!, destination);
-        if (mounted) setState(() => _status = 'تم استلام وحفظ $safeName');
+        final name = _incomingNames.remove(payload.id);
+        if (name == null) {
+          // File and its filename metadata are separate payloads and may arrive
+          // in either order. Hold the temporary URI until the name is received.
+          _pendingIncomingUris[payload.id] = payload.uri!;
+        } else {
+          await _saveIncomingFile(payload.id, payload.uri!, name);
+        }
       }
     } catch (e) {
       if (mounted) setState(() => _error = 'حدث خطأ أثناء حفظ الملف المستلم: $e');
+    }
+  }
+
+  Future<void> _saveIncomingFile(int payloadId, String sourceUri, String name) async {
+    if (!_savingPayloads.add(payloadId)) return;
+    try {
+      final docs = await getApplicationDocumentsDirectory();
+      final folder = Directory('${docs.path}/SM Player');
+      if (!await folder.exists()) await folder.create(recursive: true);
+      // Keep Arabic and other Unicode filenames; strip only path separators and
+      // control characters so a sender cannot escape the destination directory.
+      final safeName = name
+          .split(RegExp(r'[/\\\\]'))
+          .last
+          .replaceAll(RegExp(r'[\\x00-\\x1F\\x7F]'), '_')
+          .trim();
+      final finalName = safeName.isEmpty || safeName == '.' || safeName == '..'
+          ? 'received_$payloadId.bin'
+          : safeName;
+      var destination = '${folder.path}/$finalName';
+      if (await File(destination).exists()) {
+        final dot = finalName.lastIndexOf('.');
+        final stem = dot > 0 ? finalName.substring(0, dot) : finalName;
+        final ext = dot > 0 ? finalName.substring(dot) : '';
+        destination = '${folder.path}/${stem}_${DateTime.now().millisecondsSinceEpoch}$ext';
+      }
+      await _nearby.copyFileAndDeleteOriginal(sourceUri, destination);
+      _incomingNames.remove(payloadId);
+      if (mounted) setState(() => _status = 'تم استلام وحفظ ${finalName}');
+    } finally {
+      _savingPayloads.remove(payloadId);
     }
   }
 
