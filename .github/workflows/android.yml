@@ -457,8 +457,8 @@ jobs:
               'android.permission.ACCESS_NETWORK_STATE',
           ]:
               if permission not in text:
-                  text = text.replace('<application', f'<uses-permission android:name="{permission}" />\\n    <application', 1)
-          pattern = r'(<application\\b[^>]*)(>)'
+                  text = text.replace('<application', f'<uses-permission android:name="{permission}" />\n    <application', 1)
+          pattern = r'(<application\b[^>]*)(>)'
           def update_application(match):
               tag = match.group(1)
               if 'android:usesCleartextTraffic=' not in tag:
