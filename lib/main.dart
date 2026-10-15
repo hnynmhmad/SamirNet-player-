@@ -1183,7 +1183,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       // existing media session rather than starting a second audible playback.
       final handler = await getBackgroundAudioHandler();
       final activeItem = handler.mediaItem.value;
-      final activeState = handler.playbackState.value;
       if (_videoBackgroundModeEnabled &&
           handler is SNBackgroundAudioHandler &&
           handler.queue.value.any((item) => item.id == widget.file.path)) {
