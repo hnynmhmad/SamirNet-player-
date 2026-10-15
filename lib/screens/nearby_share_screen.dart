@@ -7,7 +7,6 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../services/wifi_transfer_service.dart';
-import 'nearby_devices_screen.dart';
 
 const _shareRed = Color(0xFFEF4444);
 const _shareBlue = Color(0xFF3979D5);
