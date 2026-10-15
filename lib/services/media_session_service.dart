@@ -51,6 +51,7 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
   bool _backgroundQueueActive = false;
   List<String>? _preparedQueuePaths;
   List<String>? _preparedQueueTitles;
+  Future<void>? _queuePreparationFuture;
   Duration _lastForegroundPosition = Duration.zero;
   bool? _lastForegroundPlaying;
 
@@ -228,10 +229,28 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
         _player.processingState != ProcessingState.idle) {
       return;
     }
+    final preparation = _prepareQueueSource(files, titles, paths);
+    _queuePreparationFuture = preparation;
+    try {
+      await preparation;
+    } finally {
+      if (identical(_queuePreparationFuture, preparation)) {
+        _queuePreparationFuture = null;
+      }
+    }
+  }
+
+  Future<void> _prepareQueueSource(
+    List<File> files,
+    List<String> titles,
+    List<String> paths,
+  ) async {
+    if (_backgroundQueueActive) return;
     // Preload the local video audio tracks while the video is still playing in
     // the foreground. Tapping the background button can then start immediately
     // instead of waiting several seconds for ExoPlayer to open every file.
     await _player.pause();
+    if (_backgroundQueueActive) return;
     await _player.setAudioSource(
       ConcatenatingAudioSource(
         children: files.map((file) => AudioSource.file(file.path)).toList(),
@@ -264,6 +283,14 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
   Future<void> playQueueInBackground(List<File> files, List<String> titles, int initialIndex, {Duration startPosition = Duration.zero}) async {
     if (files.isEmpty || files.length != titles.length) {
       throw ArgumentError('The music queue is empty or invalid');
+    }
+    final preparation = _queuePreparationFuture;
+    if (preparation != null) {
+      try {
+        await preparation;
+      } catch (error) {
+        debugPrint('Background queue preload failed; loading on demand: $error');
+      }
     }
     final paths = files.map((file) => file.path).toList(growable: false);
     final canReusePreparedQueue =
