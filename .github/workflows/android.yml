@@ -25,6 +25,45 @@ jobs:
           cache: true
       - name: Generate Android platform files
         run: flutter create --platforms=android --org com.samirnet .
+      - name: Configure permissions for offline nearby sharing
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          path = Path('android/app/src/main/AndroidManifest.xml')
+          text = path.read_text()
+          permissions = [
+              ('android.permission.INTERNET', None),
+              ('android.permission.ACCESS_NETWORK_STATE', None),
+              ('android.permission.ACCESS_WIFI_STATE', None),
+              ('android.permission.CHANGE_WIFI_STATE', '32'),
+              ('android.permission.BLUETOOTH', '30'),
+              ('android.permission.BLUETOOTH_ADMIN', '30'),
+              ('android.permission.BLUETOOTH_SCAN', None),
+              ('android.permission.BLUETOOTH_CONNECT', None),
+              ('android.permission.BLUETOOTH_ADVERTISE', None),
+              ('android.permission.ACCESS_FINE_LOCATION', '32'),
+              ('android.permission.NEARBY_WIFI_DEVICES', None),
+              ('android.permission.CAMERA', None),
+          ]
+          additions = []
+          for name, max_sdk in permissions:
+              if name in text:
+                  continue
+              extra = f' android:maxSdkVersion="{max_sdk}"' if max_sdk else ''
+              additions.append(f'    <uses-permission android:name="{name}"{extra} />')
+          if additions:
+              pos = text.find('<application')
+              if pos < 0:
+                  raise SystemExit('Android manifest has no application element')
+              text = text[:pos] + '\\n'.join(additions) + '\\n    ' + text[pos:]
+          if '<application' not in text:
+              raise SystemExit('Android manifest update failed')
+          path.write_text(text)
+          ET.parse(path)
+          print('Added and validated offline nearby, Bluetooth, camera, and local-network permissions.')
+          PY
       - name: Create SM Player launcher icon
         shell: bash
         run: |
