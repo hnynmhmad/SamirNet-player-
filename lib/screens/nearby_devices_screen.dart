@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:app_settings/app_settings.dart';
 import 'package:flutter/material.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:path_provider/path_provider.dart';
@@ -217,7 +218,31 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
             if (_busy) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator(color: _nearbyRed)),
           ]),
         ),
-        if (_error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: const TextStyle(color: _nearbyRed))),
+        if (_error != null) ...[
+          Padding(padding: const EdgeInsets.only(top: 12), child: Text(_error!, style: const TextStyle(color: _nearbyRed))),
+          const SizedBox(height: 8),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => AppSettings.openAppSettings(type: AppSettingsType.wifi),
+                icon: const Icon(Icons.wifi),
+                label: const Text('إعدادات Wi-Fi'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => AppSettings.openAppSettings(type: AppSettingsType.bluetooth),
+                icon: const Icon(Icons.bluetooth),
+                label: const Text('إعدادات Bluetooth'),
+              ),
+              TextButton.icon(
+                onPressed: _busy ? null : _start,
+                icon: const Icon(Icons.refresh),
+                label: const Text('إعادة المحاولة'),
+              ),
+            ],
+          ),
+        ],
         if (!widget.receiveMode) ...[
           const SizedBox(height: 18),
           if (_devices.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('ضع الهاتفين قريبين من بعضهما وافتح شاشة الاستلام في الهاتف الآخر.', textAlign: TextAlign.center)),
