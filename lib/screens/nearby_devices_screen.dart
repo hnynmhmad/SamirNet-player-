@@ -167,8 +167,8 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     try {
       for (final file in _files) {
         final name = file.uri.pathSegments.isEmpty ? 'file.bin' : file.uri.pathSegments.last;
-        await _nearby.sendBytesPayload(endpointId, utf8.encode('SMFILE:${-1}:$name'));
-        await _nearby.sendFilePayload(endpointId, file.path);
+        final payloadId = await _nearby.sendFilePayload(endpointId, file.path);
+        await _nearby.sendBytesPayload(endpointId, utf8.encode('SMFILE:$payloadId:$name'));
         if (mounted) setState(() => _status = 'أُرسل $name');
       }
       if (mounted) setState(() => _status = 'اكتمل إرسال الملفات');
