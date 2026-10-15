@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -27,6 +28,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final Map<int, String> _incomingNames = {};
   final Map<int, String> _pendingIncomingUris = {};
   final Set<int> _savingPayloads = {};
+  final Map<int, Completer<void>> _pendingAcks = {};
   List<File> _files = [];
   bool _running = false;
   bool _busy = false;
@@ -102,7 +104,19 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     try {
       if (payload.type == PayloadType.BYTES && payload.bytes != null) {
         final text = utf8.decode(payload.bytes!, allowMalformed: true);
-        if (text.startsWith('SMFILE:')) {
+        if (text.startsWith('SMACK:')) {
+          final separator = text.indexOf(':', 6);
+          if (separator > 6) {
+            final id = int.tryParse(text.substring(6, separator));
+            if (id != null) {
+              final completer = _pendingAcks.remove(id);
+              if (completer != null && !completer.isCompleted) {
+                completer.complete();
+              }
+              if (mounted) setState(() => _status = 'أكد الجهاز المستقبِل حفظ الملف');
+            }
+          }
+        } else if (text.startsWith('SMFILE:')) {
           final separator = text.indexOf(':', 7);
           if (separator > 7 && separator < text.length - 1) {
             final id = int.tryParse(text.substring(7, separator));
@@ -111,7 +125,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
               _incomingNames[id] = name;
               final pendingUri = _pendingIncomingUris.remove(id);
               if (pendingUri != null) {
-                await _saveIncomingFile(id, pendingUri, name);
+                await _saveIncomingFile(id, pendingUri, name, endpointId);
               }
             }
           }
@@ -123,7 +137,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           // in either order. Hold the temporary URI until the name is received.
           _pendingIncomingUris[payload.id] = payload.uri!;
         } else {
-          await _saveIncomingFile(payload.id, payload.uri!, name);
+          await _saveIncomingFile(payload.id, payload.uri!, name, endpointId);
         }
       }
     } catch (e) {
@@ -131,7 +145,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     }
   }
 
-  Future<void> _saveIncomingFile(int payloadId, String sourceUri, String name) async {
+  Future<void> _saveIncomingFile(int payloadId, String sourceUri, String name, String endpointId) async {
     if (!_savingPayloads.add(payloadId)) return;
     try {
       final docs = await getApplicationDocumentsDirectory();
@@ -156,6 +170,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       }
       await _nearby.copyFileAndDeleteOriginal(sourceUri, destination);
       _incomingNames.remove(payloadId);
+      await _nearby.sendBytesPayload(endpointId, utf8.encode('SMACK:$payloadId:$finalName'));
       if (mounted) setState(() => _status = 'تم استلام وحفظ $finalName');
     } finally {
       _savingPayloads.remove(payloadId);
@@ -212,13 +227,22 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       for (final file in _files) {
         final name = file.uri.pathSegments.isEmpty ? 'file.bin' : file.uri.pathSegments.last;
         final payloadId = await _nearby.sendFilePayload(endpointId, file.path);
+        final ack = Completer<void>();
+        _pendingAcks[payloadId] = ack;
         await _nearby.sendBytesPayload(endpointId, utf8.encode('SMFILE:$payloadId:$name'));
-        if (mounted) setState(() => _status = 'أُرسل $name');
+        if (mounted) setState(() => _status = 'جارٍ نقل $name — في انتظار تأكيد الحفظ...');
+        await ack.future.timeout(const Duration(minutes: 10));
+        if (mounted) setState(() => _status = 'أكد الجهاز المستقبِل حفظ $name');
       }
-      if (mounted) setState(() => _status = 'اكتمل إرسال الملفات');
+      if (mounted) setState(() => _status = 'اكتمل الإرسال وأكد الجهاز المستقبِل حفظ الملفات');
     } catch (e) {
-      if (mounted) setState(() => _error = 'تعذر إرسال الملفات: $e');
+      for (final completer in _pendingAcks.values) {
+        if (!completer.isCompleted) completer.completeError(e);
+      }
+      _pendingAcks.clear();
+      if (mounted) setState(() => _error = 'تعذر إكمال الإرسال أو لم يصل تأكيد الحفظ: $e');
     } finally {
+      _pendingAcks.clear();
       if (mounted) setState(() => _busy = false);
     }
   }
