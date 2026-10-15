@@ -74,36 +74,12 @@ class NearbyShareScreen extends StatelessWidget {
                 onTap: () => Navigator.push(context,
                     MaterialPageRoute(builder: (_) => const _ReceiveScreen())),
               ),
-              const SizedBox(height: 14),
-              _ActionCard(
-                color: const Color(0xFF16866A),
-                background: const Color(0xFFE1F5ED),
-                icon: Icons.radar_rounded,
-                title: 'الأجهزة القريبة — إرسال مباشر',
-                subtitle: 'اكتشاف تلقائي ونقل دون إنترنت',
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen(receiveMode: false))),
-              ),
-              const SizedBox(height: 14),
-              _ActionCard(
-                color: const Color(0xFF3979D5),
-                background: const Color(0xFFE4EEFC),
-                icon: Icons.phonelink_ring_rounded,
-                title: 'استلام من جهاز قريب',
-                subtitle: 'اجعل هاتفك ظاهرًا للأجهزة القريبة',
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen(receiveMode: true))),
-              ),
               const SizedBox(height: 18),
               const ListTile(
                 leading: Icon(Icons.wifi_tethering_rounded, color: _shareBlue),
-                title: Text('اتصال محلي'),
+                title: Text('نقل محلي دون إنترنت'),
                 subtitle: Text(
-                    'يجب أن يكون الهاتفان على الشبكة المحلية نفسها. يمكن استخدام نقطة اتصال أحد الهاتفين دون إنترنت.'),
-              ),
-              const ListTile(
-                leading: Icon(Icons.lock_outline_rounded, color: _shareRed),
-                title: Text('استلام محمي'),
-                subtitle: Text(
-                    'يستخدم كل جلسة رمزًا عشوائيًا، ولا يقبل الخادم الملفات من دون الرمز الصحيح.'),
+                    'يمكن استخدام شبكة Wi-Fi أو نقطة اتصال أحد الهاتفين.'),
               ),
             ],
           ),
@@ -294,6 +270,22 @@ class _ReceiveScreenState extends State<_ReceiveScreen> {
   }
 }
 
+class _PickChip extends StatelessWidget {
+  const _PickChip({required this.icon, required this.label, required this.onPressed});
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => ActionChip(
+        avatar: Icon(icon, size: 19, color: _shareRed),
+        label: Text(label),
+        onPressed: onPressed,
+        side: const BorderSide(color: Color(0xFFE8BDBD)),
+        backgroundColor: const Color(0xFFFFF5F5),
+      );
+}
+
 class _SendScreen extends StatefulWidget {
   const _SendScreen();
   @override
@@ -307,6 +299,32 @@ class _SendScreenState extends State<_SendScreen> {
   int _total = 0;
   String? _status;
   String? _error;
+
+  Future<void> _pickByType(FileType type, String label) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: type,
+        withData: false,
+      );
+      if (result == null) return;
+      final picked = result.files
+          .where((f) => f.path != null)
+          .map((f) => File(f.path!))
+          .where((f) => f.existsSync())
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        for (final file in picked) {
+          if (!_files.any((old) => old.path == file.path)) _files.add(file);
+        }
+        _error = null;
+        _status = picked.isEmpty ? 'لم يتم اختيار ${label}' : 'تمت إضافة ${picked.length} ملف';
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = 'تعذر اختيار ${label}: $e');
+    }
+  }
 
   Future<void> _pickFiles() async {
     try {
@@ -468,24 +486,22 @@ class _SendScreenState extends State<_SendScreen> {
         body: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.all(14),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(12, 14, 12, 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
                 children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _busy ? null : _pickFiles,
-                      icon: const Icon(Icons.add_photo_alternate_outlined),
-                      label: const Text('اختيار ملفات'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _busy ? null : _pickFolder,
-                      icon: const Icon(Icons.folder_open_rounded),
-                      label: const Text('اختيار مجلد'),
-                    ),
-                  ),
+                  _PickChip(icon: Icons.movie_outlined, label: 'الفيديوهات',
+                    onPressed: _busy ? null : () => _pickByType(FileType.video, 'الفيديوهات')),
+                  _PickChip(icon: Icons.music_note_rounded, label: 'الموسيقى',
+                    onPressed: _busy ? null : () => _pickByType(FileType.audio, 'الموسيقى')),
+                  _PickChip(icon: Icons.photo_library_outlined, label: 'الصور',
+                    onPressed: _busy ? null : () => _pickByType(FileType.image, 'الصور')),
+                  _PickChip(icon: Icons.insert_drive_file_outlined, label: 'كل الملفات',
+                    onPressed: _busy ? null : _pickFiles),
+                  _PickChip(icon: Icons.folder_open_rounded, label: 'المجلدات',
+                    onPressed: _busy ? null : _pickFolder),
                 ],
               ),
             ),
