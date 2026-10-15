@@ -591,8 +591,24 @@ jobs:
         run: flutter analyze
       - name: Test
         run: flutter test
-      - name: Build release APK
-        run: flutter build apk --release
+      - name: Build release APK (retry transient Android SDK downloads)
+        shell: bash
+        run: |
+          set +e
+          for attempt in 1 2 3; do
+            echo "Release build attempt $attempt/3"
+            flutter build apk --release
+            result=$?
+            if [ "$result" -eq 0 ]; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Build failed; clearing potentially incomplete NDK download before retry."
+              rm -rf "$ANDROID_SDK_ROOT/ndk/28.2.13676358" "$ANDROID_HOME/ndk/28.2.13676358"
+              sleep 5
+            fi
+          done
+          exit 1
       - uses: actions/upload-artifact@v4
         with:
           name: samirnet-player-apk
