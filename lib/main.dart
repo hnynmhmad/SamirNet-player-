@@ -14,6 +14,7 @@ import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'services/vault_service.dart';
 import 'services/wifi_transfer_service.dart';
+import 'screens/nearby_share_screen.dart';
 import 'services/media_session_service.dart';
 
 const coral = Color(0xFFEF4444);
@@ -216,7 +217,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     Iterable<MediaEntry> list = videos;
     if (tab == 0 && !showAllVideos) list = history.map((id) => videos.where((v) => v.id == id).firstOrNull).whereType<MediaEntry>();
     if (tab == 2) list = list.where((v) => favorites.contains(v.id));
-    if (tab == 3) list = history.map((id) => videos.where((v) => v.id == id).firstOrNull).whereType<MediaEntry>();
     if (filter == 1) list = list.where((v) => v.duration.inMinutes < 10);
     if (filter == 2) list = list.where((v) => v.duration.inMinutes >= 10);
     if (query.trim().isNotEmpty) list = list.where((v) => v.name.toLowerCase().contains(query.trim().toLowerCase()));
@@ -270,14 +270,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
         PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')),
         PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا')),
       ]),
-      IconButton(tooltip: 'نقل عبر Wi-Fi', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WifiTransferScreen())), icon: const Icon(Icons.wifi_rounded)),
+      IconButton(tooltip: 'نقل الملفات', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyShareScreen())), icon: const Icon(Icons.swap_vert_rounded, color: coral)),
     ]),
     body: tab == 4 ? _settings() : tab == 1 ? _folders() : _library(),
-    bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (v) => setState(() { tab = v; if (v != 0) showAllVideos = false; }), destinations: const [
+    bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (v) { if (v == 3) { Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyShareScreen())); return; } setState(() { tab = v; if (v != 0) showAllVideos = false; }); }, destinations: const [
       NavigationDestination(icon: Icon(Icons.video_library_outlined), selectedIcon: Icon(Icons.video_library), label: 'الرئيسية'),
       NavigationDestination(icon: Icon(Icons.folder_outlined), selectedIcon: Icon(Icons.folder), label: 'المجلدات'),
       NavigationDestination(icon: Icon(Icons.favorite_border), selectedIcon: Icon(Icons.favorite), label: 'المفضلة'),
-      NavigationDestination(icon: Icon(Icons.history), selectedIcon: Icon(Icons.history_rounded), label: 'السجل'),
+      NavigationDestination(icon: Icon(Icons.swap_vert_rounded), selectedIcon: Icon(Icons.swap_vert_rounded), label: 'نقل الملفات'),
       NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'الإعدادات'),
     ]),
   ));
@@ -285,7 +285,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final items = shown;
     return RefreshIndicator(onRefresh: _scan, child: CustomScrollView(physics: const AlwaysScrollableScrollPhysics(), slivers: [
       SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(['الرئيسية', 'المجلدات', 'المفضلة', 'السجل'][tab], style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+        Text(['الرئيسية', 'المجلدات', 'المفضلة', 'المفضلة'][tab], style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
         const SizedBox(height: 4), Text('${videos.length} فيديو على الجهاز', style: const TextStyle(color: Colors.grey)),
         const SizedBox(height: 16),
         TextField(controller: search, onChanged: (v) => setState(() => query = v), decoration: InputDecoration(hintText: 'ابحث عن فيديو...', prefixIcon: const Icon(Icons.search), filled: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none))),
