@@ -51,7 +51,7 @@ jobs:
               if permission_name not in text:
                   if '<application' not in text:
                       raise SystemExit('AndroidManifest.xml has no application element')
-                  text = text.replace('<application', permission + '\\n    <application', 1)
+                  text = text.replace('<application', permission + '\n    <application', 1)
           manifest.write_text(text)
           for required in ('android.permission.CAMERA', 'android.permission.NEARBY_WIFI_DEVICES'):
               if required not in manifest.read_text():
