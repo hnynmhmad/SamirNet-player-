@@ -862,14 +862,14 @@ class _DeviceStoragePickerScreenState extends State<DeviceStoragePickerScreen> {
         added++;
       }
       if (mounted) setState(() => _error = added == 0 ? 'لم يتم العثور على ملفات قابلة للقراءة داخل هذا المجلد.' : 'تم تحديد $added ملفًا من المجلد.');
-    } catch (e) {
+    } catch (_) {
       if (mounted) setState(() => _error = 'تم تحديد ما أمكن قراءته من المجلد. بعض المسارات محمية من Android.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _toggleFile(File file) async {
+  void _toggleFile(File file) {
     if (_selected.contains(file.path)) {
       setState(() => _selected.remove(file.path));
       return;
