@@ -726,7 +726,7 @@ class _DeviceStoragePickerScreenState extends State<DeviceStoragePickerScreen> {
                               }
                             },
                           );
-                        },                        },
+                        },
                       ),
           ),
           SafeArea(
