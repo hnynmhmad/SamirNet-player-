@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -201,7 +202,7 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
         Expanded(child: _assetList(_albumVideos, empty: 'هذا المجلد لا يحتوي على فيديوهات.')),
       ]);
     }
-    final albums = _videoAlbums.where((a) => a.name.toLowerCase() != 'recent' && a.assetCountAsync != null).toList();
+    final albums = _videoAlbums.where((a) => a.name.toLowerCase() != 'recent').toList();
     if (albums.isEmpty) return const Center(child: Text('لا توجد مجلدات فيديو.'));
     return ListView.separated(
       itemCount: albums.length,
@@ -251,7 +252,7 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
             clipBehavior: Clip.antiAlias,
             child: Column(children: [
               Expanded(child: Stack(fit: StackFit.expand, children: [
-                AssetEntityImage(asset, isOriginal: false, thumbnailSize: const ThumbnailSize(300, 300), fit: BoxFit.cover),
+                _assetThumbnail(asset),
                 if (asset.type == AssetType.video)
                   const Positioned(left: 6, bottom: 6, child: Icon(Icons.play_circle_fill, color: Colors.white, size: 25)),
                 Positioned(left: 6, top: 6, child: Icon(
@@ -277,6 +278,21 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
       },
     );
   }
+
+  Widget _assetThumbnail(AssetEntity asset) => FutureBuilder<Uint8List?>(
+    future: asset.thumbnailDataWithSize(const ThumbnailSize(300, 300)),
+    builder: (context, snapshot) {
+      final bytes = snapshot.data;
+      if (bytes == null) {
+        return Container(
+          color: const Color(0xFFF3F4F6),
+          alignment: Alignment.center,
+          child: Icon(asset.type == AssetType.audio ? Icons.music_note_rounded : Icons.movie_outlined, color: _pickerRed, size: 34),
+        );
+      }
+      return Image.memory(bytes, fit: BoxFit.cover, width: double.infinity, height: double.infinity);
+    },
+  );
 
   String _dateLabel(DateTime date) => '${date.year}/${date.month.toString().padLeft(2, '0')}/${date.day.toString().padLeft(2, '0')}';
 }
