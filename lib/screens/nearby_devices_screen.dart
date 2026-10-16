@@ -351,27 +351,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     }
   }
 
-  Future<void> _pickFolder() async {
-    try {
-      final path = await FilePicker.platform.getDirectoryPath();
-      if (path == null) return;
-      final found = <File>[];
-      await for (final entity in Directory(path).list(recursive: true, followLinks: false)) {
-        if (entity is File) found.add(entity);
-      }
-      if (mounted) {
-        setState(() {
-          for (final file in found) {
-            if (!_queue.any((old) => old.path == file.path)) _queue.add(file);
-          }
-          _error = null;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _error = 'تعذر قراءة المجلد: $e');
-    }
-  }
-
   Future<void> _sendQueue() async {
     if (_queue.isEmpty || _connected.isEmpty || _sending) return;
     setState(() {
