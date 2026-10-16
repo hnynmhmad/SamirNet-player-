@@ -362,8 +362,9 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                 Navigator.pop(dialogContext);
                 if (mounted) {
                   setState(() => _status = 'تم مسح الرمز. جارٍ العثور على $target عبر الاتصال المحلي...');
-                  final match = _discovered.entries.where((entry) => entry.value == target).firstOrNull;
-                  if (match != null) _connect(match.key, match.value);
+                  for (final entry in _discovered.entries) {
+                    if (entry.value == target) { _connect(entry.key, entry.value); break; }
+                  }
                 }
               }),
             )),
@@ -536,6 +537,37 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
               if (_starting) const LinearProgressIndicator(color: _nearbyRed),
               if (_status != null) Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(_status!))),
               if (_error != null) Card(color: Theme.of(context).colorScheme.errorContainer, child: Padding(padding: const EdgeInsets.all(12), child: Text(_error!))),
+              if (widget.receiveMode) ...[
+                Card(
+                  color: const Color(0xFFFFEEEE),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(children: [
+                      const Icon(Icons.wifi_tethering_rounded, color: _nearbyRed, size: 36),
+                      const SizedBox(height: 8),
+                      const Text('هذا الهاتف جاهز للاستقبال', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 4),
+                      const Text('أبقِ هذه الشاشة مفتوحة ليتمكن الهاتف الآخر من العثور عليك.', textAlign: TextAlign.center),
+                      const SizedBox(height: 12),
+                      QrImageView(data: 'SMPLAYER|$_localName', version: QrVersions.auto, size: 190, backgroundColor: Colors.white),
+                      const SizedBox(height: 6),
+                      Text(_localName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      const Text('يمكن مسح الرمز لتحديد اسم الجهاز، ثم يتم الاتصال عبر الأجهزة القريبة.', textAlign: TextAlign.center, style: TextStyle(fontSize: 12)),
+                    ]),
+                  ),
+                ),
+              ] else ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(foregroundColor: _nearbyRed, padding: const EdgeInsets.symmetric(vertical: 12)),
+                    onPressed: _scanQr,
+                    icon: const Icon(Icons.qr_code_scanner_rounded),
+                    label: const Text('مسح QR للاتصال السريع'),
+                  ),
+                ),
+              ],
               if (!widget.receiveMode) ...[
                 const SizedBox(height: 8),
                 const Text('الأجهزة المكتشفة', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
@@ -560,7 +592,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
               const Text('إرسال ملفات', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
               Row(children: [
-                Expanded(child: OutlinedButton.icon(onPressed: _pickFiles, icon: const Icon(Icons.perm_media_outlined), label: const Text('الوسائط والمجلدات'))),
+                Expanded(child: OutlinedButton.icon(onPressed: _pickMediaFiles, icon: const Icon(Icons.perm_media_outlined), label: const Text('الفيديوهات والمجلدات والموسيقى'))),
                 const SizedBox(width: 8),
                 Expanded(child: OutlinedButton.icon(onPressed: _pickOtherFiles, icon: const Icon(Icons.insert_drive_file_outlined), label: const Text('ملفات أخرى'))),
               ]),
