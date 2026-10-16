@@ -36,6 +36,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final Set<int> _completedPayloads = {};
   final Map<int, int> _progressBytes = {};
   final Map<int, int> _progressTotals = {};
+  final Map<int, String> _progressNames = {};
 
   bool _starting = false;
   bool _advertising = false;
@@ -364,6 +365,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         if (!await file.exists()) continue;
         for (final endpointId in _connected.keys.toList()) {
           final payloadId = await _nearby.sendFilePayload(endpointId, file.path);
+          _progressNames[payloadId] = file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last;
           final digest = (await sha256.bind(file.openRead()).first).toString();
           await _nearby.sendBytesPayload(
             endpointId,
@@ -496,13 +498,32 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
               ],
               if (_progressTotals.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                const Text('تقدم النقل', style: TextStyle(fontWeight: FontWeight.bold)),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Text('إجمالي تقدم النقل', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 6),
+                      Text('${_formatBytes(_progressBytes.values.fold<int>(0, (sum, value) => sum + value))} من ${_formatBytes(_progressTotals.values.fold<int>(0, (sum, value) => sum + value))}'),
+                      const SizedBox(height: 6),
+                      LinearProgressIndicator(
+                        value: _progressTotals.values.fold<int>(0, (sum, value) => sum + value) <= 0
+                            ? null
+                            : (_progressBytes.values.fold<int>(0, (sum, value) => sum + value) /
+                                _progressTotals.values.fold<int>(0, (sum, value) => sum + value)).clamp(0.0, 1.0).toDouble(),
+                        color: _nearbyRed,
+                      ),
+                    ]),
+                  ),
+                ),
+                const Text('تقدم كل ملف', style: TextStyle(fontWeight: FontWeight.bold)),
                 ..._progressTotals.entries.map((entry) {
                   final sent = _progressBytes[entry.key] ?? 0;
                   final total = entry.value;
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(_progressNames[entry.key] ?? 'ملف ${entry.key}', maxLines: 1, overflow: TextOverflow.ellipsis),
                       Text('${_formatBytes(sent)} / ${_formatBytes(total)}'),
                       const SizedBox(height: 4),
                       LinearProgressIndicator(value: total <= 0 ? null : (sent / total).clamp(0.0, 1.0).toDouble(), color: _nearbyRed),
