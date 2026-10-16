@@ -317,7 +317,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
 
   String _safeFileName(String name) {
     final leaf = name.split(RegExp(r'[/\\\\]')).last.trim();
-    final safe = leaf.replaceAll(RegExp(r'[\\x00-\\x1F<>:"/\\\\|?*]'), '_').trim();
+    final safe = leaf.replaceAll(RegExp(r'[\x00-\x1F<>:"/\\|?*]'), '_').trim();
     return safe.isEmpty || safe == '.' || safe == '..' ? 'received_file.bin' : safe;
   }
 
