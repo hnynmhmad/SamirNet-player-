@@ -9,7 +9,6 @@ import 'package:flutter/material.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:photo_manager/photo_manager.dart';
 
 const _nearbyServiceId = 'com.samirnet.snplayer.transfer';
 const _nearbyRed = Color(0xFFEF4444);
