@@ -13,6 +13,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'screens/nearby_devices_screen.dart';
+import 'screens/transfer_media_picker_screen.dart';
 import 'services/vault_service.dart';
 import 'services/wifi_transfer_service.dart';
 import 'services/media_session_service.dart';
@@ -290,8 +291,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ),
     );
     if (!mounted || receiveMode == null) return;
+    List<File> initialFiles = [];
+    if (!receiveMode) {
+      final picked = await Navigator.push<List<File>>(
+        context,
+        MaterialPageRoute(builder: (_) => const TransferMediaPickerScreen()),
+      );
+      if (!mounted || picked == null || picked.isEmpty) return;
+      initialFiles = picked;
+    }
     await Navigator.push(context, MaterialPageRoute(
-      builder: (_) => NearbyDevicesScreen(receiveMode: receiveMode),
+      builder: (_) => NearbyDevicesScreen(receiveMode: receiveMode, initialFiles: initialFiles),
     ));
   }
 
