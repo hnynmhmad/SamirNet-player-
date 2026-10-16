@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:nearby_connections/nearby_connections.dart';
@@ -53,19 +54,31 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       _error = 'النقل المباشر متاح حاليًا على Android فقط.';
       return false;
     }
-    final statuses = await <Permission>[
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.bluetoothAdvertise,
-      Permission.nearbyWifiDevices,
-      Permission.locationWhenInUse,
-    ].request();
+    final android = await DeviceInfoPlugin().androidInfo;
+    final sdk = android.version.sdkInt;
+    final requiredPermissions = <Permission>[
+      if (sdk >= 31) ...[
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+        Permission.bluetoothAdvertise,
+      ] else ...[
+        Permission.bluetooth,
+        Permission.bluetoothAdvertise,
+        Permission.locationWhenInUse,
+      ],
+      if (sdk >= 33) Permission.nearbyWifiDevices,
+    ];
+    final statuses = await requiredPermissions.request();
     final denied = statuses.entries
         .where((entry) => entry.value.isDenied || entry.value.isPermanentlyDenied)
         .map((entry) => entry.key.toString().split('.').last)
         .toList();
     if (denied.isNotEmpty) {
       _error = 'يلزم السماح بصلاحيات الاتصال بالأجهزة القريبة. افتح أذونات التطبيق وحاول مجددًا.';
+      return false;
+    }
+    if (sdk <= 30 && !await Permission.location.serviceStatus.isEnabled) {
+      _error = 'فعّل خدمة الموقع من إعدادات الهاتف؛ يحتاجها Android القديم لاكتشاف الأجهزة القريبة، ولا يلزم تشغيل الإنترنت.';
       return false;
     }
     return true;
