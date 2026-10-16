@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:photo_manager/photo_manager.dart';
 
 const _nearbyServiceId = 'com.samirnet.snplayer.transfer';
 const _nearbyRed = Color(0xFFEF4444);
@@ -301,24 +302,43 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
 
   Future<void> _pickFiles() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
-        allowMultiple: true,
-        type: FileType.any,
-        withData: false,
+      final result = await Navigator.push<List<File>>(
+        context,
+        MaterialPageRoute(builder: (_) => const NearbyMediaPickerScreen()),
       );
       if (result == null || !mounted) return;
-      final additions = result.files
-          .where((f) => f.path != null)
-          .map((f) => File(f.path!))
-          .where((f) => f.existsSync());
       setState(() {
-        for (final file in additions) {
+        for (final file in result) {
           if (!_queue.any((old) => old.path == file.path)) _queue.add(file);
         }
         _error = null;
       });
     } catch (e) {
       if (mounted) setState(() => _error = 'تعذر اختيار الملفات: $e');
+    }
+  }
+
+  Future<void> _pickOtherFiles() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.any,
+        withData: false,
+      );
+      if (result == null || !mounted) return;
+      setState(() {
+        for (final picked in result.files) {
+          final path = picked.path;
+          if (path == null) continue;
+          final file = File(path);
+          if (file.existsSync() && !_queue.any((old) => old.path == path)) {
+            _queue.add(file);
+          }
+        }
+        _error = null;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = 'تعذر اختيار الملفات الأخرى: $e');
     }
   }
 
@@ -464,9 +484,9 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
               const Text('إرسال ملفات', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
               Row(children: [
-                Expanded(child: OutlinedButton.icon(onPressed: _pickFiles, icon: const Icon(Icons.attach_file), label: const Text('اختيار ملفات'))),
+                Expanded(child: OutlinedButton.icon(onPressed: _pickFiles, icon: const Icon(Icons.perm_media_outlined), label: const Text('الوسائط والمجلدات'))),
                 const SizedBox(width: 8),
-                Expanded(child: OutlinedButton.icon(onPressed: _pickFolder, icon: const Icon(Icons.folder_open), label: const Text('إضافة مجلد'))),
+                Expanded(child: OutlinedButton.icon(onPressed: _pickOtherFiles, icon: const Icon(Icons.insert_drive_file_outlined), label: const Text('ملفات أخرى'))),
               ]),
               if (_queue.isNotEmpty) ...[
                 const SizedBox(height: 8),
@@ -514,4 +534,202 @@ String _formatBytes(int bytes) {
   if (bytes >= 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
   return '$bytes B';
+}
+
+class NearbyMediaPickerScreen extends StatefulWidget {
+  const NearbyMediaPickerScreen({super.key});
+
+  @override
+  State<NearbyMediaPickerScreen> createState() => _NearbyMediaPickerScreenState();
+}
+
+class _NearbyMediaPickerScreenState extends State<NearbyMediaPickerScreen> {
+  RequestType _type = RequestType.video;
+  List<AssetPathEntity> _albums = [];
+  AssetPathEntity? _album;
+  List<AssetEntity> _assets = [];
+  final Set<String> _selected = {};
+  final Map<String, File> _files = {};
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAssets();
+  }
+
+  Future<void> _loadAssets() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      final permission = await PhotoManager.requestPermissionExtend();
+      if (!permission.isAuth) {
+        _error = 'اسمح لـ SM Player بالوصول إلى الصور والفيديوهات من إعدادات الأذونات.';
+        return;
+      }
+      final albums = await PhotoManager.getAssetPathList(
+        type: _type,
+        hasAll: true,
+        onlyAll: false,
+      );
+      _albums = albums;
+      _album = albums.isEmpty ? null : albums.first;
+      _assets = _album == null
+          ? <AssetEntity>[]
+          : await _album!.getAssetListPaged(page: 0, size: 250);
+    } catch (e) {
+      _error = 'تعذر قراءة مكتبة الوسائط: $e';
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _changeType(RequestType type) async {
+    if (_type == type) return;
+    setState(() { _type = type; _selected.clear(); _files.clear(); });
+    await _loadAssets();
+  }
+
+  Future<void> _changeAlbum(AssetPathEntity? album) async {
+    if (album == null) return;
+    setState(() { _album = album; _loading = true; _selected.clear(); _files.clear(); });
+    try {
+      _assets = await album.getAssetListPaged(page: 0, size: 250);
+    } catch (e) {
+      _error = 'تعذر فتح هذا المجلد: $e';
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _toggle(AssetEntity asset) async {
+    if (_selected.contains(asset.id)) {
+      setState(() { _selected.remove(asset.id); _files.remove(asset.id); });
+      return;
+    }
+    try {
+      final file = await asset.file;
+      if (file == null || !await file.exists()) {
+        if (mounted) setState(() => _error = 'تعذر الوصول إلى أحد الملفات المحددة.');
+        return;
+      }
+      if (mounted) setState(() { _selected.add(asset.id); _files[asset.id] = file; _error = null; });
+    } catch (e) {
+      if (mounted) setState(() => _error = 'تعذر قراءة الملف: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Directionality(
+    textDirection: TextDirection.rtl,
+    child: Scaffold(
+      appBar: AppBar(
+        title: const Text('اختيار ملفات للإرسال'),
+        actions: [
+          TextButton(
+            onPressed: _selected.isEmpty ? null : () => Navigator.pop(context, _files.values.toList()),
+            child: Text('إضافة (${_selected.length})'),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                ChoiceChip(label: const Text('الفيديوهات'), selected: _type == RequestType.video, onSelected: (_) => _changeType(RequestType.video)),
+                ChoiceChip(label: const Text('الصور'), selected: _type == RequestType.image, onSelected: (_) => _changeType(RequestType.image)),
+                ChoiceChip(label: const Text('الصوتيات'), selected: _type == RequestType.audio, onSelected: (_) => _changeType(RequestType.audio)),
+              ],
+            ),
+          ),
+          if (_albums.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: DropdownButtonFormField<AssetPathEntity>(
+                value: _album,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'المجلد / الألبوم', border: OutlineInputBorder()),
+                items: _albums.map((album) => DropdownMenuItem(value: album, child: Text(album.name, overflow: TextOverflow.ellipsis))).toList(),
+                onChanged: _loading ? null : _changeAlbum,
+              ),
+            ),
+          if (_selected.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: Row(children: [
+                Text('تم تحديد ${_selected.length} ملف', style: const TextStyle(fontWeight: FontWeight.bold)),
+                const Spacer(),
+                TextButton(onPressed: () => setState(() { _selected.clear(); _files.clear(); }), child: const Text('إلغاء التحديد')),
+              ]),
+            ),
+          if (_error != null)
+            Padding(padding: const EdgeInsets.all(12), child: Text(_error!, style: const TextStyle(color: _nearbyRed))),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(color: _nearbyRed))
+                : _assets.isEmpty
+                    ? const Center(child: Text('لا توجد ملفات في هذا الألبوم.'))
+                    : GridView.builder(
+                        padding: const EdgeInsets.all(10),
+                        itemCount: _assets.length,
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: .72),
+                        itemBuilder: (context, index) {
+                          final asset = _assets[index];
+                          final selected = _selected.contains(asset.id);
+                          return InkWell(
+                            onTap: () => _toggle(asset),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(color: selected ? _nearbyRed : Colors.transparent, width: 3),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: Column(
+                                children: [
+                                  Expanded(
+                                    child: Stack(fit: StackFit.expand, children: [
+                                      FutureBuilder<Uint8List?>(
+                                        future: asset.thumbnailDataWithSize(const ThumbnailSize(360, 360)),
+                                        builder: (_, snapshot) => snapshot.data == null
+                                            ? const ColoredBox(color: Color(0xFFE5E7EB), child: Icon(Icons.insert_drive_file_outlined))
+                                            : Image.memory(snapshot.data!, fit: BoxFit.cover),
+                                      ),
+                                      if (selected)
+                                        const Positioned(top: 6, right: 6, child: CircleAvatar(radius: 12, backgroundColor: _nearbyRed, child: Icon(Icons.check, size: 16, color: Colors.white))),
+                                    ]),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.all(5),
+                                    child: Text(asset.title ?? 'ملف بدون اسم', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: _nearbyRed, padding: const EdgeInsets.symmetric(vertical: 14)),
+                  onPressed: _selected.isEmpty ? null : () => Navigator.pop(context, _files.values.toList()),
+                  icon: const Icon(Icons.add_rounded),
+                  label: Text('إضافة الملفات المحددة (${_selected.length})'),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
