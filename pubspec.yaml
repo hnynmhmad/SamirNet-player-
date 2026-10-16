@@ -1,5 +1,5 @@
 name: samirnet_player
-description: SamirNet Player - Arabic-first local media player for Android.
+description: SM Player - Arabic-first local media player for Android.
 publish_to: "none"
 version: 0.1.0+1
 
@@ -27,6 +27,10 @@ dependencies:
   share_plus: ^10.1.4
   audio_service: ^0.18.18
   just_audio: ^0.10.4
+  mobile_scanner: ^6.0.11
+  qr_flutter: ^4.1.0
+  nearby_connections: ^4.3.0
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:
