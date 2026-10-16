@@ -39,6 +39,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final Map<int, int> _progressBytes = {};
   final Map<int, int> _progressTotals = {};
   final Map<int, String> _progressNames = {};
+  final Map<int, DateTime> _progressStartedAt = {};
 
   bool _starting = false;
   bool _advertising = false;
@@ -269,7 +270,13 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       setState(() {
         _progressBytes[update.id] = update.bytesTransferred;
         _progressTotals[update.id] = update.totalBytes;
-        _status = 'جارٍ نقل ملف: ${_formatBytes(update.bytesTransferred)} من ${_formatBytes(update.totalBytes)}';
+        _progressStartedAt.putIfAbsent(update.id, DateTime.now);
+        final elapsed = DateTime.now().difference(_progressStartedAt[update.id]!).inMilliseconds / 1000.0;
+        final speed = elapsed > 0 ? update.bytesTransferred / elapsed : 0.0;
+        final remaining = speed > 0 && update.totalBytes >= update.bytesTransferred
+            ? Duration(seconds: ((update.totalBytes - update.bytesTransferred) / speed).round())
+            : null;
+        _status = 'جارٍ نقل ملف: ${_formatBytes(update.bytesTransferred)} من ${_formatBytes(update.totalBytes)} · ${_formatSpeed(speed)}${remaining == null ? '' : ' · متبقٍ ${_formatDuration(remaining)}'}';
       });
     } else if (update.status == PayloadStatus.FAILURE) {
       setState(() => _error = 'فشل نقل أحد الملفات. افحص الاتصال ثم أعد المحاولة.');
@@ -279,6 +286,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       setState(() {
         _progressBytes[update.id] = update.totalBytes;
         _progressTotals[update.id] = update.totalBytes;
+        _progressStartedAt.putIfAbsent(update.id, DateTime.now);
         _status = 'اكتمل نقل ملف (${_formatBytes(update.totalBytes)}).';
       });
     }
@@ -378,9 +386,34 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                     errorBuilder: (context, error, child) => Center(
                       child: Padding(
                         padding: const EdgeInsets.all(16),
-                        child: Text(
-                          'تعذر تشغيل الكاميرا: ${error.errorCode.name}. تحقق من إذن الكاميرا وأغلق أي تطبيق آخر يستخدمها ثم حاول مجددًا.',
-                          textAlign: TextAlign.center,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.no_photography_outlined, size: 42),
+                            const SizedBox(height: 12),
+                            Text(
+                              error.errorCode == MobileScannerErrorCode.permissionDenied
+                                  ? 'إذن الكاميرا غير متاح. اسمح للتطبيق باستخدام الكاميرا من إعدادات Android ثم أعد المحاولة.'
+                                  : 'تعذر تشغيل الكاميرا (${error.errorCode.name}). أغلق تطبيق الكاميرا وأي ماسح آخر، ثم أعد المحاولة. إذا استمر الخطأ، أغلق التطبيق وافتحه مجددًا.',
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.icon(
+                              onPressed: () async {
+                                try {
+                                  await controller.stop();
+                                  await Future<void>.delayed(const Duration(milliseconds: 350));
+                                  await controller.start();
+                                } catch (retryError) {
+                                  if (mounted) {
+                                    setState(() => _error = 'تعذرت إعادة تشغيل الكاميرا: $retryError. أغلق التطبيقات التي قد تستخدم الكاميرا ثم حاول مجددًا.');
+                                  }
+                                }
+                              },
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text('إعادة محاولة تشغيل الكاميرا'),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -483,7 +516,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           final digest = (await sha256.bind(file.openRead()).first).toString();
           await _nearby.sendBytesPayload(
             endpointId,
-            Uint8List.fromList(utf8.encode('SMFILE1|$payloadId|${file.uri.pathSegments.last}|$digest')),
+            Uint8List.fromList(utf8.encode('SMFILE1|$payloadId|${Uri.encodeComponent(file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last)}|$digest')),
           );
         }
         if (mounted) setState(() => _queue.remove(file));
@@ -669,7 +702,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(_progressNames[entry.key] ?? 'ملف ${entry.key}', maxLines: 1, overflow: TextOverflow.ellipsis),
-                      Text('${_formatBytes(sent)} / ${_formatBytes(total)}'),
+                      Text('${_formatBytes(sent)} / ${_formatBytes(total)} · ${_progressStartedAt[entry.key] == null || DateTime.now().difference(_progressStartedAt[entry.key]!).inMilliseconds <= 0 ? 'حساب السرعة...' : _formatSpeed(sent / (DateTime.now().difference(_progressStartedAt[entry.key]!).inMilliseconds / 1000.0))}${total > sent && _progressStartedAt[entry.key] != null && sent > 0 ? ' · متبقٍ ${_formatDuration(Duration(seconds: ((total - sent) / (sent / (DateTime.now().difference(_progressStartedAt[entry.key]!).inMilliseconds / 1000.0))).round()))}' : ''}'),
                       const SizedBox(height: 4),
                       LinearProgressIndicator(value: total <= 0 ? null : (sent / total).clamp(0.0, 1.0).toDouble(), color: _nearbyRed),
                     ]),
@@ -682,6 +715,19 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           ),
         ),
       );
+}
+
+String _formatSpeed(double bytesPerSecond) {
+  if (!bytesPerSecond.isFinite || bytesPerSecond <= 0) return '0 B/s';
+  if (bytesPerSecond >= 1024 * 1024) return '${(bytesPerSecond / (1024 * 1024)).toStringAsFixed(1)} MB/s';
+  if (bytesPerSecond >= 1024) return '${(bytesPerSecond / 1024).toStringAsFixed(1)} KB/s';
+  return '${bytesPerSecond.toStringAsFixed(0)} B/s';
+}
+
+String _formatDuration(Duration duration) {
+  if (duration.inHours > 0) return '${duration.inHours} س ${duration.inMinutes.remainder(60)} د';
+  if (duration.inMinutes > 0) return '${duration.inMinutes} د ${duration.inSeconds.remainder(60)} ث';
+  return '${duration.inSeconds} ث';
 }
 
 String _formatBytes(int bytes) {
