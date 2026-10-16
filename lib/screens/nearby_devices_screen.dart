@@ -387,6 +387,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       if (!mounted) return;
 
       final controller = MobileScannerController(
+        autoStart: false,
         facing: CameraFacing.back,
         detectionSpeed: DetectionSpeed.noDuplicates,
         formats: const [BarcodeFormat.qrCode],
@@ -394,7 +395,21 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       try {
         await showDialog<void>(
           context: context,
-          builder: (dialogContext) => Dialog(
+          builder: (dialogContext) {
+            // Start only after the dialog and scanner view have entered the tree.
+            // This avoids CameraX initialization racing the route transition.
+            WidgetsBinding.instance.addPostFrameCallback((_) async {
+              if (!dialogContext.mounted) return;
+              try {
+                await controller.start();
+              } catch (cameraError) {
+                if (mounted) {
+                  setState(() => _error =
+                      'تعذر تهيئة الكاميرا لمسح QR: $cameraError. تحقق من أذونات الكاميرا ثم أعد المحاولة.');
+                }
+              }
+            });
+            return Dialog(
             insetPadding: const EdgeInsets.all(18),
             child: SizedBox(
               height: 460,
@@ -475,6 +490,8 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
               ]),
             ),
           ),
+        );
+          },
         );
       } finally {
         await controller.dispose();
