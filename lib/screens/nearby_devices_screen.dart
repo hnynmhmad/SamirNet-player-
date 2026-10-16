@@ -99,7 +99,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       if (widget.receiveMode) {
         _advertising = await _nearby.startAdvertising(
           _localName,
-          Strategy.P2P_STAR,
+          Strategy.P2P_POINT_TO_POINT,
           onConnectionInitiated: _onConnectionInitiated,
           onConnectionResult: _onConnectionResult,
           onDisconnected: _onDisconnected,
