@@ -36,6 +36,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final Map<int, String> _receivedUris = {};
   final Map<int, String> _receivedDigests = {};
   final Set<int> _completedPayloads = {};
+  final Set<int> _finalizingPayloads = {};
   final Map<int, int> _progressBytes = {};
   final Map<int, int> _progressTotals = {};
   final Map<int, String> _progressNames = {};
@@ -297,11 +298,35 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     final name = _receivedNames[payloadId];
     final expectedDigest = _receivedDigests[payloadId];
     if (uri == null || name == null || expectedDigest == null || !_completedPayloads.contains(payloadId)) return;
-    _receivedUris.remove(payloadId);
-    _receivedNames.remove(payloadId);
-    _receivedDigests.remove(payloadId);
-    _completedPayloads.remove(payloadId);
+    if (!_finalizingPayloads.add(payloadId)) return;
     try {
+      if (!mounted) return;
+      final accepted = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('استلام ملف جديد؟'),
+          content: Text('يريد الجهاز المتصل إرسال الملف التالي:\n\n$name\n\nلن يُحفظ الملف إلا بعد موافقتك والتحقق من سلامته.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('رفض الملف'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('قبول وحفظ'),
+            ),
+          ],
+        ),
+      );
+      _receivedUris.remove(payloadId);
+      _receivedNames.remove(payloadId);
+      _receivedDigests.remove(payloadId);
+      _completedPayloads.remove(payloadId);
+      if (accepted != true) {
+        if (mounted) setState(() => _status = 'تم رفض الملف الوارد: $name');
+        return;
+      }
       var inbox = Directory('/storage/emulated/0/Download/SM Player Received');
       if (!await inbox.parent.exists()) {
         inbox = Directory('/sdcard/Download/SM Player Received');
@@ -318,6 +343,8 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       if (mounted) setState(() => _status = 'تم استلام الملف والتحقق من سلامته: ${destination.path}');
     } catch (e) {
       if (mounted) setState(() => _error = 'وصل الملف لكن تعذر حفظه: $e');
+    } finally {
+      _finalizingPayloads.remove(payloadId);
     }
   }
 
