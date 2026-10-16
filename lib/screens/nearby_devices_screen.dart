@@ -78,13 +78,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       _error = 'يلزم السماح بصلاحيات الاتصال بالأجهزة القريبة. افتح أذونات التطبيق وحاول مجددًا.';
       return false;
     }
-    final bluetoothService = await (sdk >= 31
-        ? Permission.bluetoothScan.serviceStatus
-        : Permission.bluetooth.serviceStatus);
-    if (!bluetoothService.isEnabled) {
-      _error = 'فعّل Bluetooth من إعدادات الهاتف ثم اضغط إعادة البحث. لا يحتاج النقل إلى الإنترنت.';
-      return false;
-    }
     final locationService = await Permission.location.serviceStatus;
     if (sdk <= 32 && !locationService.isEnabled) {
       _error = 'فعّل خدمة الموقع من إعدادات الهاتف؛ يحتاجها Android القديم لاكتشاف الأجهزة القريبة، ولا يلزم تشغيل الإنترنت.';
@@ -137,7 +130,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         _status = 'جارٍ البحث عن أجهزة SM Player القريبة دون إنترنت...';
       }
     } catch (e) {
-      _error = 'تعذر بدء الاتصال: $e';
+      _error = 'تعذر بدء الاتصال: $e. تأكد من تفعيل Bluetooth وWi-Fi والأجهزة القريبة على الهاتفين، ولا يلزم الإنترنت.';
       await _stopDiscoveryAndAdvertising();
     } finally {
       if (mounted) setState(() => _starting = false);
