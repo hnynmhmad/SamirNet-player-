@@ -80,7 +80,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       return false;
     }
     final locationService = await Permission.location.serviceStatus;
-    if (!locationService.isEnabled) {
+    if (sdk <= 32 && !locationService.isEnabled) {
       _error = 'فعّل خدمة الموقع من إعدادات الهاتف؛ يحتاجها Android القديم لاكتشاف الأجهزة القريبة، ولا يلزم تشغيل الإنترنت.';
       return false;
     }
