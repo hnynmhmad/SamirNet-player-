@@ -349,6 +349,8 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         return;
       }
 
+      if (!mounted) return;
+
       final controller = MobileScannerController(
         facing: CameraFacing.back,
         detectionSpeed: DetectionSpeed.noDuplicates,
