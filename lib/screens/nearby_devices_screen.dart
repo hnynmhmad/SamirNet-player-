@@ -396,24 +396,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     }
   }
 
-  Future<void> _pickFiles() async {
-    try {
-      final result = await Navigator.push<List<File>>(
-        context,
-        MaterialPageRoute(builder: (_) => const DeviceStoragePickerScreen()),
-      );
-      if (result == null || !mounted) return;
-      setState(() {
-        for (final file in result) {
-          if (!_queue.any((old) => old.path == file.path)) _queue.add(file);
-        }
-        _error = null;
-      });
-    } catch (e) {
-      if (mounted) setState(() => _error = 'تعذر اختيار الملفات: $e');
-    }
-  }
-
   Future<void> _pickOtherFiles() async {
     try {
       final result = await FilePicker.platform.pickFiles(
