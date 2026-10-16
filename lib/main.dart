@@ -12,6 +12,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
+import 'screens/nearby_devices_screen.dart';
 import 'services/vault_service.dart';
 import 'services/wifi_transfer_service.dart';
 import 'services/media_session_service.dart';
@@ -270,7 +271,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')),
         PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا')),
       ]),
-      IconButton(tooltip: 'نقل عبر Wi-Fi', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WifiTransferScreen())), icon: const Icon(Icons.wifi_rounded)),
+      Padding(padding: const EdgeInsetsDirectional.only(start: 6, end: 8), child: IconButton.filled(tooltip: 'نقل الملفات دون إنترنت', style: IconButton.styleFrom(backgroundColor: coral, foregroundColor: Colors.white), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen())), icon: const Icon(Icons.swap_vert_rounded, size: 28))),
     ]),
     body: tab == 4 ? _settings() : tab == 1 ? _folders() : _library(),
     bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (v) => setState(() { tab = v; if (v != 0) showAllVideos = false; }), destinations: const [
@@ -390,7 +391,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       SwitchListTile(value: grid, onChanged: (v) { setState(() => grid = v); _saveViewPreferences(); }, title: const Text('عرض الشبكة'), subtitle: const Text('إيقاف الخيار يعرض الملفات في قائمة')),
       ListTile(leading: const Icon(Icons.refresh), title: const Text('تحديث مكتبة الوسائط'), onTap: _scan),
       ListTile(leading: const Icon(Icons.lock_outline, color: coral), title: const Text('الخزنة الخاصة'), subtitle: const Text('تشفير ملفاتك وحمايتها برقم سري'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VaultScreen()))),
-      ListTile(leading: const Icon(Icons.wifi, color: coral), title: const Text('نقل عبر Wi-Fi'), subtitle: const Text('استقبال ملفات من جهاز آخر على الشبكة نفسها'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WifiTransferScreen()))),
+      ListTile(leading: const CircleAvatar(backgroundColor: coral, child: Icon(Icons.swap_vert_rounded, color: Colors.white)), title: const Text('نقل الملفات دون إنترنت', style: TextStyle(fontWeight: FontWeight.bold)), subtitle: const Text('إرسال واستقبال الملفات مباشرة بين الهاتفين'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen()))),
     ])),
     const SizedBox(height: 20), const Center(child: Text('SM Player · 0.1.0', style: TextStyle(color: Colors.grey))),
   ]);
