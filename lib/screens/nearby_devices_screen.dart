@@ -8,6 +8,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'transfer_media_picker_screen.dart';
 
 const _nearbyServiceId = 'com.samirnet.snplayer.transfer';
 const _nearbyRed = Color(0xFFEF4444);
@@ -15,9 +18,10 @@ const _nearbyRed = Color(0xFFEF4444);
 /// Direct, internet-free device transfer using Google Nearby Connections.
 /// Both devices can send and receive after the connection is accepted.
 class NearbyDevicesScreen extends StatefulWidget {
-  const NearbyDevicesScreen({super.key, required this.receiveMode});
+  const NearbyDevicesScreen({super.key, required this.receiveMode, this.initialFiles = const []});
 
   final bool receiveMode;
+  final List<File> initialFiles;
 
   @override
   State<NearbyDevicesScreen> createState() => _NearbyDevicesScreenState();
@@ -43,11 +47,14 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   String? _error;
   String? _status;
   String _localName = 'SM Player';
+  String? _scanTargetName;
+  bool _scanHandled = false;
 
   @override
   void initState() {
     super.initState();
     _localName = 'SM Player ${DateTime.now().millisecondsSinceEpoch % 10000}';
+    _queue.addAll(widget.initialFiles.where((file) => file.existsSync()));
     _start();
   }
 
@@ -119,6 +126,11 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
             setState(() {
               _discovered[id] = name;
               _status = 'تم العثور على جهاز قريب.';
+              if (_scanTargetName != null && name == _scanTargetName && !_connected.containsKey(id)) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) _connect(id, name);
+                });
+              }
             });
           },
           onEndpointLost: (id) {
@@ -319,6 +331,68 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     final leaf = name.split(RegExp(r'[/\\\\]')).last.trim();
     final safe = leaf.replaceAll(RegExp(r'[\x00-\x1F<>:"/\\|?*]'), '_').trim();
     return safe.isEmpty || safe == '.' || safe == '..' ? 'received_file.bin' : safe;
+  }
+
+  Future<void> _scanQr() async {
+    _scanHandled = false;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        insetPadding: const EdgeInsets.all(18),
+        child: SizedBox(
+          height: 460,
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(children: [
+                const Expanded(child: Text('امسح رمز QR الخاص بالمستلم', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17))),
+                IconButton(onPressed: () => Navigator.pop(dialogContext), icon: const Icon(Icons.close)),
+              ]),
+            ),
+            Expanded(child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: MobileScanner(onDetect: (capture) {
+                if (_scanHandled || capture.barcodes.isEmpty) return;
+                final value = capture.barcodes.first.rawValue;
+                if (value == null || !value.startsWith('SMPLAYER|')) return;
+                final target = value.substring('SMPLAYER|'.length).trim();
+                if (target.isEmpty) return;
+                _scanHandled = true;
+                _scanTargetName = target;
+                Navigator.pop(dialogContext);
+                if (mounted) {
+                  setState(() => _status = 'تم مسح الرمز. جارٍ العثور على $target عبر الاتصال المحلي...');
+                  final match = _discovered.entries.where((entry) => entry.value == target).firstOrNull;
+                  if (match != null) _connect(match.key, match.value);
+                }
+              }),
+            )),
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: Text('يجب أن يكون الهاتف المستلم في وضع الاستقبال وقريبًا منك. لا يلزم الإنترنت.', textAlign: TextAlign.center),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickMediaFiles() async {
+    try {
+      final result = await Navigator.push<List<File>>(
+        context,
+        MaterialPageRoute(builder: (_) => const TransferMediaPickerScreen()),
+      );
+      if (result == null || !mounted) return;
+      setState(() {
+        for (final file in result) {
+          if (!_queue.any((old) => old.path == file.path)) _queue.add(file);
+        }
+        _error = null;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = 'تعذر إضافة الوسائط: $e');
+    }
   }
 
   Future<void> _pickFiles() async {
