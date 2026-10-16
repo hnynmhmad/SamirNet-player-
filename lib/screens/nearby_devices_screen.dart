@@ -335,47 +335,91 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
 
   Future<void> _scanQr() async {
     _scanHandled = false;
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => Dialog(
-        insetPadding: const EdgeInsets.all(18),
-        child: SizedBox(
-          height: 460,
-          child: Column(children: [
-            Padding(
-              padding: const EdgeInsets.all(14),
-              child: Row(children: [
-                const Expanded(child: Text('امسح رمز QR الخاص بالمستلم', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17))),
-                IconButton(onPressed: () => Navigator.pop(dialogContext), icon: const Icon(Icons.close)),
+    try {
+      final cameraPermission = await Permission.camera.request();
+      if (!cameraPermission.isGranted) {
+        if (mounted) {
+          setState(() => _error = cameraPermission.isPermanentlyDenied
+              ? 'إذن الكاميرا مرفوض نهائيًا. افتح إعدادات التطبيق واسمح باستخدام الكاميرا.'
+              : 'يجب السماح باستخدام الكاميرا لمسح رمز QR.');
+        }
+        if (cameraPermission.isPermanentlyDenied) {
+          await openAppSettings();
+        }
+        return;
+      }
+
+      final controller = MobileScannerController(
+        facing: CameraFacing.back,
+        detectionSpeed: DetectionSpeed.noDuplicates,
+        formats: const [BarcodeFormat.qrCode],
+      );
+      try {
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => Dialog(
+            insetPadding: const EdgeInsets.all(18),
+            child: SizedBox(
+              height: 460,
+              child: Column(children: [
+                Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(children: [
+                    const Expanded(child: Text('امسح رمز QR الخاص بالمستلم', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17))),
+                    IconButton(onPressed: () => Navigator.pop(dialogContext), icon: const Icon(Icons.close)),
+                  ]),
+                ),
+                Expanded(child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: MobileScanner(
+                    controller: controller,
+                    errorBuilder: (context, error, child) => Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          'تعذر تشغيل الكاميرا: ${error.errorCode.name}. تحقق من إذن الكاميرا وأغلق أي تطبيق آخر يستخدمها ثم حاول مجددًا.',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                    onDetect: (capture) {
+                      if (_scanHandled || capture.barcodes.isEmpty) return;
+                      final value = capture.barcodes.first.rawValue;
+                      if (value == null || !value.startsWith('SMPLAYER|')) return;
+                      final target = value.substring('SMPLAYER|'.length).trim();
+                      if (target.isEmpty) return;
+                      _scanHandled = true;
+                      _scanTargetName = target;
+                      Navigator.pop(dialogContext);
+                      if (mounted) {
+                        setState(() {
+                          _status = 'تم مسح رمز الجهاز $target. جارٍ إنشاء الاتصال المباشر...';
+                          _error = null;
+                        });
+                        final match = _discovered.entries.where((entry) => entry.value == target).firstOrNull;
+                        if (match != null) {
+                          _connect(match.key, match.value);
+                        } else {
+                          _status = 'تمت قراءة الرمز. انتظر ظهور الجهاز المستلم في البحث؛ سيُطلب الاتصال تلقائيًا.';
+                        }
+                      }
+                    },
+                  ),
+                )),
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text('يجب أن يكون الهاتف المستلم في وضع الاستقبال وقريبًا منك. لا يلزم الإنترنت.', textAlign: TextAlign.center),
+                ),
               ]),
             ),
-            Expanded(child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: MobileScanner(onDetect: (capture) {
-                if (_scanHandled || capture.barcodes.isEmpty) return;
-                final value = capture.barcodes.first.rawValue;
-                if (value == null || !value.startsWith('SMPLAYER|')) return;
-                final target = value.substring('SMPLAYER|'.length).trim();
-                if (target.isEmpty) return;
-                _scanHandled = true;
-                _scanTargetName = target;
-                Navigator.pop(dialogContext);
-                if (mounted) {
-                  setState(() => _status = 'تم مسح الرمز. جارٍ العثور على $target عبر الاتصال المحلي...');
-                  for (final entry in _discovered.entries) {
-                    if (entry.value == target) { _connect(entry.key, entry.value); break; }
-                  }
-                }
-              }),
-            )),
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: Text('يجب أن يكون الهاتف المستلم في وضع الاستقبال وقريبًا منك. لا يلزم الإنترنت.', textAlign: TextAlign.center),
-            ),
-          ]),
-        ),
-      ),
-    );
+          ),
+        );
+      } finally {
+        await controller.dispose();
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = 'تعذر فتح ماسح QR: $e');
+    }
   }
 
   Future<void> _pickMediaFiles() async {
