@@ -698,18 +698,35 @@ class _DeviceStoragePickerScreenState extends State<DeviceStoragePickerScreen> {
                         itemBuilder: (context, index) {
                           final entity = _entries[index];
                           final isDirectory = entity is Directory;
-                          final selected = !isDirectory && _selected.contains(entity.path);
+                          final selected = entity is File && _selected.contains(entity.path);
                           return ListTile(
                             leading: Icon(isDirectory ? Icons.folder_rounded : Icons.insert_drive_file_outlined, color: isDirectory ? _nearbyRed : null),
                             title: Text(_name(entity), maxLines: 1, overflow: TextOverflow.ellipsis),
-                            subtitle: Text(isDirectory ? 'مجلد — اضغط للفتح أو اضغط مطولًا لتحديد محتوياته' : entity.path, maxLines: 1, overflow: TextOverflow.ellipsis, textDirection: isDirectory ? TextDirection.rtl : TextDirection.ltr),
-                            trailing: isDirectory
-                                ? const Icon(Icons.chevron_left_rounded)
-                                : Checkbox(value: selected, onChanged: (_) => _toggleFile(entity as File)),
-                            onTap: isDirectory ? () => _open(entity as Directory) : () => _toggleFile(entity as File),
-                            onLongPress: isDirectory ? () => _selectFolder(entity as Directory) : () => _toggleFile(entity as File),
+                            subtitle: Text(
+                              isDirectory ? 'مجلد — اضغط للفتح أو اضغط مطولًا لتحديد محتوياته' : entity.path,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textDirection: isDirectory ? TextDirection.rtl : TextDirection.ltr,
+                            ),
+                            trailing: entity is File
+                                ? Checkbox(value: selected, onChanged: (_) => _toggleFile(entity))
+                                : const Icon(Icons.chevron_left_rounded),
+                            onTap: () {
+                              if (entity is Directory) {
+                                _open(entity);
+                              } else if (entity is File) {
+                                _toggleFile(entity);
+                              }
+                            },
+                            onLongPress: () {
+                              if (entity is Directory) {
+                                _selectFolder(entity);
+                              } else if (entity is File) {
+                                _toggleFile(entity);
+                              }
+                            },
                           );
-                        },
+                        },                        },
                       ),
           ),
           SafeArea(
