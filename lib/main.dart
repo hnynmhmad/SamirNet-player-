@@ -251,6 +251,50 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await p.setString('video_sort', videoSort);
   }
   void _toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+  Future<void> _openTransferChooser() async {
+    final receiveMode = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('نقل الملفات دون إنترنت', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              const Text('اختر طريقة بدء الاتصال بين الهاتفين. لا يلزم اتصال بالإنترنت.'),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: coral, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
+                  onPressed: () => Navigator.pop(sheetContext, false),
+                  icon: const Icon(Icons.search_rounded),
+                  label: const Text('إرسال ملفات — البحث عن جهاز'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(foregroundColor: coral, padding: const EdgeInsets.symmetric(vertical: 14)),
+                  onPressed: () => Navigator.pop(sheetContext, true),
+                  icon: const Icon(Icons.download_rounded),
+                  label: const Text('استقبال ملفات — إظهار هذا الهاتف'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || receiveMode == null) return;
+    await Navigator.push(context, MaterialPageRoute(
+      builder: (_) => NearbyDevicesScreen(receiveMode: receiveMode),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) => Directionality(textDirection: TextDirection.rtl, child: Scaffold(
     appBar: AppBar(title: const Row(children: [
@@ -271,7 +315,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')),
         PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا')),
       ]),
-      Padding(padding: const EdgeInsetsDirectional.only(start: 6, end: 8), child: IconButton.filled(tooltip: 'نقل الملفات دون إنترنت', style: IconButton.styleFrom(backgroundColor: coral, foregroundColor: Colors.white), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen())), icon: const Icon(Icons.swap_vert_rounded, size: 28))),
+      Padding(padding: const EdgeInsetsDirectional.only(start: 6, end: 8), child: IconButton.filled(tooltip: 'نقل الملفات دون إنترنت', style: IconButton.styleFrom(backgroundColor: coral, foregroundColor: Colors.white), onPressed: _openTransferChooser, icon: const Icon(Icons.swap_vert_rounded, size: 28))),
     ]),
     body: tab == 4 ? _settings() : tab == 1 ? _folders() : _library(),
     bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (v) => setState(() { tab = v; if (v != 0) showAllVideos = false; }), destinations: const [
@@ -391,7 +435,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       SwitchListTile(value: grid, onChanged: (v) { setState(() => grid = v); _saveViewPreferences(); }, title: const Text('عرض الشبكة'), subtitle: const Text('إيقاف الخيار يعرض الملفات في قائمة')),
       ListTile(leading: const Icon(Icons.refresh), title: const Text('تحديث مكتبة الوسائط'), onTap: _scan),
       ListTile(leading: const Icon(Icons.lock_outline, color: coral), title: const Text('الخزنة الخاصة'), subtitle: const Text('تشفير ملفاتك وحمايتها برقم سري'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VaultScreen()))),
-      ListTile(leading: const CircleAvatar(backgroundColor: coral, child: Icon(Icons.swap_vert_rounded, color: Colors.white)), title: const Text('نقل الملفات دون إنترنت', style: TextStyle(fontWeight: FontWeight.bold)), subtitle: const Text('إرسال واستقبال الملفات مباشرة بين الهاتفين'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen()))),
+      ListTile(leading: const CircleAvatar(backgroundColor: coral, child: Icon(Icons.swap_vert_rounded, color: Colors.white)), title: const Text('نقل الملفات دون إنترنت', style: TextStyle(fontWeight: FontWeight.bold)), subtitle: const Text('إرسال واستقبال الملفات مباشرة بين الهاتفين'), trailing: const Icon(Icons.chevron_left), onTap: _openTransferChooser),
     ])),
     const SizedBox(height: 20), const Center(child: Text('SM Player · 0.1.0', style: TextStyle(color: Colors.grey))),
   ]);
