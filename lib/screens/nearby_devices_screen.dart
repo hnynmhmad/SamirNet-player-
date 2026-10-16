@@ -696,8 +696,8 @@ class _DeviceStoragePickerScreenState extends State<DeviceStoragePickerScreen> {
                             subtitle: Text(isDirectory ? 'مجلد — اضغط للفتح أو اضغط مطولًا لتحديد محتوياته' : entity.path, maxLines: 1, overflow: TextOverflow.ellipsis, textDirection: isDirectory ? TextDirection.rtl : TextDirection.ltr),
                             trailing: isDirectory
                                 ? const Icon(Icons.chevron_left_rounded)
-                                : Checkbox(value: selected, onChanged: (_) => _toggleFile(entity as File)),
-                            onTap: isDirectory ? () => _open(entity as Directory) : () => _toggleFile(entity as File),
+                                : Checkbox(value: selected, onChanged: (_) => _toggleFile(entity)),
+                            onTap: isDirectory ? () => _open(entity) : () => _toggleFile(entity as File),
                             onLongPress: isDirectory ? () => _selectFolder(entity as Directory) : () => _toggleFile(entity as File),
                           );
                         },
