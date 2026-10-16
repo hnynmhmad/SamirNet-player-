@@ -591,6 +591,37 @@ class _NearbyMediaPickerScreenState extends State<NearbyMediaPickerScreen> {
     }
   }
 
+  Future<void> _selectWholeAlbum(AssetPathEntity album) async {
+    setState(() { _album = album; _loading = true; _error = null; });
+    try {
+      final count = await album.assetCountAsync;
+      final all = <AssetEntity>[];
+      for (var page = 0; page * 200 < count; page++) {
+        all.addAll(await album.getAssetListPaged(page: page, size: 200));
+      }
+      final files = <String, File>{};
+      for (final asset in all) {
+        final file = await asset.file;
+        if (file != null && await file.exists()) files[asset.id] = file;
+      }
+      if (mounted) {
+        setState(() {
+          _assets = all;
+          _selected
+            ..clear()
+            ..addAll(files.keys);
+          _files
+            ..clear()
+            ..addAll(files);
+        });
+      }
+    } catch (e) {
+      _error = 'تعذر تحديد محتويات المجلد: $e';
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
   Future<void> _toggle(AssetEntity asset) async {
     if (_selected.contains(asset.id)) {
       setState(() { _selected.remove(asset.id); _files.remove(asset.id); });
@@ -635,16 +666,28 @@ class _NearbyMediaPickerScreenState extends State<NearbyMediaPickerScreen> {
             ),
           ),
           if (_albums.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: DropdownButtonFormField<AssetPathEntity>(
-                value: _album,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'المجلد / الألبوم', border: OutlineInputBorder()),
-                items: _albums.map((album) => DropdownMenuItem(value: album, child: Text(album.name, overflow: TextOverflow.ellipsis))).toList(),
-                onChanged: _loading ? null : _changeAlbum,
+            SizedBox(
+              height: 52,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: _albums.map((album) => Padding(
+                  padding: const EdgeInsetsDirectional.only(end: 8),
+                  child: GestureDetector(
+                    onLongPress: _loading ? null : () => _selectWholeAlbum(album),
+                    child: ChoiceChip(
+                      label: Text(album.name, overflow: TextOverflow.ellipsis),
+                      selected: _album?.id == album.id,
+                      onSelected: _loading ? null : (_) => _changeAlbum(album),
+                    ),
+                  ),
+                )).toList(),
               ),
             ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(12, 4, 12, 0),
+            child: Align(alignment: Alignment.centerRight, child: Text('اضغط على المجلد لفتحه، أو اضغط مطولًا لتحديد محتوياته.', style: TextStyle(color: Colors.grey, fontSize: 12))),
+          ),
           if (_selected.isNotEmpty)
             Padding(
               padding: const EdgeInsets.all(10),
