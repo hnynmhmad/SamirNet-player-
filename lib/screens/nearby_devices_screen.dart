@@ -120,7 +120,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       } else {
         _discovering = await _nearby.startDiscovery(
           _localName,
-          Strategy.P2P_STAR,
+          Strategy.P2P_POINT_TO_POINT,
           onEndpointFound: (id, name, serviceId) {
             if (serviceId != _nearbyServiceId || !mounted) return;
             setState(() {
