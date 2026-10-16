@@ -7,7 +7,6 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:nearby_connections/nearby_connections.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 const _nearbyServiceId = 'com.samirnet.snplayer.transfer';
@@ -281,8 +280,10 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     _receivedDigests.remove(payloadId);
     _completedPayloads.remove(payloadId);
     try {
-      final docs = await getApplicationDocumentsDirectory();
-      final inbox = Directory('${docs.path}/SM Player/Received');
+      var inbox = Directory('/storage/emulated/0/Download/SM Player Received');
+      if (!await inbox.parent.exists()) {
+        inbox = Directory('/sdcard/Download/SM Player Received');
+      }
       await inbox.create(recursive: true);
       final destination = await _uniqueFile(inbox, name);
       final saved = await _nearby.copyFileAndDeleteOriginal(uri, destination.path);
