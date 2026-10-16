@@ -499,6 +499,32 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     }
   }
 
+  Future<void> _pickFolder() async {
+    try {
+      final path = await FilePicker.platform.getDirectoryPath();
+      if (path == null || !mounted) return;
+      final directory = Directory(path);
+      if (!await directory.exists()) {
+        setState(() => _error = 'المجلد المحدد غير موجود أو لم يعد متاحًا.');
+        return;
+      }
+      final found = <File>[];
+      await for (final entity in directory.list(recursive: true, followLinks: false)) {
+        if (entity is File) found.add(entity);
+      }
+      if (!mounted) return;
+      setState(() {
+        for (final file in found) {
+          if (!_queue.any((old) => old.path == file.path)) _queue.add(file);
+        }
+        _error = found.isEmpty ? 'المجلد المحدد لا يحتوي على ملفات قابلة للإرسال.' : null;
+        _status = found.isEmpty ? _status : 'أُضيف ${found.length} ملفًا من المجلد إلى قائمة الإرسال.';
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = 'تعذر قراءة المجلد المحدد: $e');
+    }
+  }
+
   Future<void> _sendQueue() async {
     if (_queue.isEmpty || _connected.isEmpty || _sending) return;
     setState(() {
@@ -652,11 +678,15 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
               const Divider(height: 28),
               const Text('إرسال ملفات', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
-              Row(children: [
-                Expanded(child: OutlinedButton.icon(onPressed: _pickMediaFiles, icon: const Icon(Icons.perm_media_outlined), label: const Text('الفيديوهات والمجلدات والموسيقى'))),
-                const SizedBox(width: 8),
-                Expanded(child: OutlinedButton.icon(onPressed: _pickOtherFiles, icon: const Icon(Icons.insert_drive_file_outlined), label: const Text('ملفات أخرى'))),
-              ]),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(onPressed: _pickMediaFiles, icon: const Icon(Icons.perm_media_outlined), label: const Text('الفيديوهات والموسيقى')),
+                  OutlinedButton.icon(onPressed: _pickOtherFiles, icon: const Icon(Icons.insert_drive_file_outlined), label: const Text('ملفات أخرى')),
+                  OutlinedButton.icon(onPressed: _pickFolder, icon: const Icon(Icons.folder_open_rounded), label: const Text('اختيار مجلد كامل')),
+                ],
+              ),
               if (_queue.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text('${_queue.length} ملف في قائمة الإرسال', style: const TextStyle(fontWeight: FontWeight.bold)),
