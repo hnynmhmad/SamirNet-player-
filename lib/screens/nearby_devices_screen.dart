@@ -63,7 +63,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         Permission.bluetoothAdvertise,
       ] else ...[
         Permission.bluetooth,
-        Permission.bluetoothAdvertise,
         Permission.locationWhenInUse,
       ],
       if (sdk >= 33) Permission.nearbyWifiDevices,
@@ -77,7 +76,8 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       _error = 'يلزم السماح بصلاحيات الاتصال بالأجهزة القريبة. افتح أذونات التطبيق وحاول مجددًا.';
       return false;
     }
-    if (sdk <= 30 && !await Permission.location.serviceStatus.isEnabled) {
+    final locationService = await Permission.location.serviceStatus;
+    if (sdk <= 30 && !locationService.isEnabled) {
       _error = 'فعّل خدمة الموقع من إعدادات الهاتف؛ يحتاجها Android القديم لاكتشاف الأجهزة القريبة، ولا يلزم تشغيل الإنترنت.';
       return false;
     }
