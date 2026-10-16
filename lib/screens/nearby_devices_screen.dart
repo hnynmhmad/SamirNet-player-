@@ -483,7 +483,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text('${_formatBytes(sent)} / ${_formatBytes(total)}'),
                       const SizedBox(height: 4),
-                      LinearProgressIndicator(value: total <= 0 ? null : (sent / total).clamp(0.0, 1.0), color: _nearbyRed),
+                      LinearProgressIndicator(value: total <= 0 ? null : (sent / total).clamp(0.0, 1.0).toDouble(), color: _nearbyRed),
                     ]),
                   );
                 }),
