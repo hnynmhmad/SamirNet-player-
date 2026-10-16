@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -31,6 +32,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final List<File> _queue = [];
   final Map<int, String> _receivedNames = {};
   final Map<int, String> _receivedUris = {};
+  final Map<int, String> _receivedDigests = {};
   final Set<int> _completedPayloads = {};
   final Map<int, int> _progressBytes = {};
   final Map<int, int> _progressTotals = {};
@@ -263,9 +265,11 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   Future<void> _tryFinalizeReceivedFile(int payloadId) async {
     final uri = _receivedUris[payloadId];
     final name = _receivedNames[payloadId];
-    if (uri == null || name == null || !_completedPayloads.contains(payloadId)) return;
+    final expectedDigest = _receivedDigests[payloadId];
+    if (uri == null || name == null || expectedDigest == null || !_completedPayloads.contains(payloadId)) return;
     _receivedUris.remove(payloadId);
     _receivedNames.remove(payloadId);
+    _receivedDigests.remove(payloadId);
     _completedPayloads.remove(payloadId);
     try {
       final docs = await getApplicationDocumentsDirectory();
@@ -274,7 +278,12 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       final destination = await _uniqueFile(inbox, name);
       final saved = await _nearby.copyFileAndDeleteOriginal(uri, destination.path);
       if (!saved) throw Exception('لم يتمكن التطبيق من حفظ الملف المستلم.');
-      if (mounted) setState(() => _status = 'تم استلام الملف وحفظه: ${destination.path}');
+      final actualDigest = (await sha256.bind(destination.openRead()).first).toString();
+      if (actualDigest != expectedDigest) {
+        await destination.delete();
+        throw Exception('فشل التحقق من سلامة الملف بعد النقل؛ حُذف الملف غير المطابق.');
+      }
+      if (mounted) setState(() => _status = 'تم استلام الملف والتحقق من سلامته: ${destination.path}');
     } catch (e) {
       if (mounted) setState(() => _error = 'وصل الملف لكن تعذر حفظه: $e');
     }
@@ -376,9 +385,10 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         if (!await file.exists()) continue;
         for (final endpointId in _connected.keys.toList()) {
           final payloadId = await _nearby.sendFilePayload(endpointId, file.path);
+          final digest = (await sha256.bind(file.openRead()).first).toString();
           await _nearby.sendBytesPayload(
             endpointId,
-            Uint8List.fromList(utf8.encode('SMFILE1|$payloadId|${file.uri.pathSegments.last}')),
+            Uint8List.fromList(utf8.encode('SMFILE1|$payloadId|${file.uri.pathSegments.last}|$digest')),
           );
         }
         if (mounted) setState(() => _queue.remove(file));
