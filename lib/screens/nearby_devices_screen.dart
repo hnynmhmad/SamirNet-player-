@@ -78,6 +78,13 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       _error = 'يلزم السماح بصلاحيات الاتصال بالأجهزة القريبة. افتح أذونات التطبيق وحاول مجددًا.';
       return false;
     }
+    final bluetoothService = await (sdk >= 31
+        ? Permission.bluetoothScan.serviceStatus
+        : Permission.bluetooth.serviceStatus);
+    if (!bluetoothService.isEnabled) {
+      _error = 'فعّل Bluetooth من إعدادات الهاتف ثم اضغط إعادة البحث. لا يحتاج النقل إلى الإنترنت.';
+      return false;
+    }
     final locationService = await Permission.location.serviceStatus;
     if (sdk <= 32 && !locationService.isEnabled) {
       _error = 'فعّل خدمة الموقع من إعدادات الهاتف؛ يحتاجها Android القديم لاكتشاف الأجهزة القريبة، ولا يلزم تشغيل الإنترنت.';
