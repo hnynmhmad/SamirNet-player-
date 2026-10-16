@@ -314,7 +314,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     try {
       final result = await Navigator.push<List<File>>(
         context,
-        MaterialPageRoute(builder: (_) => const NearbyMediaPickerScreen()),
+        MaterialPageRoute(builder: (_) => const DeviceStoragePickerScreen()),
       );
       if (result == null || !mounted) return;
       setState(() {
@@ -775,6 +775,185 @@ class _NearbyMediaPickerScreenState extends State<NearbyMediaPickerScreen> {
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(backgroundColor: _nearbyRed, padding: const EdgeInsets.symmetric(vertical: 14)),
                   onPressed: _selected.isEmpty ? null : () => Navigator.pop(context, _files.values.toList()),
+                  icon: const Icon(Icons.add_rounded),
+                  label: Text('إضافة الملفات المحددة (${_selected.length})'),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class DeviceStoragePickerScreen extends StatefulWidget {
+  const DeviceStoragePickerScreen({super.key});
+
+  @override
+  State<DeviceStoragePickerScreen> createState() => _DeviceStoragePickerScreenState();
+}
+
+class _DeviceStoragePickerScreenState extends State<DeviceStoragePickerScreen> {
+  Directory _current = Directory('/storage/emulated/0');
+  List<FileSystemEntity> _entries = [];
+  final Set<String> _selected = {};
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      if (!await Permission.manageExternalStorage.isGranted) {
+        final result = await Permission.manageExternalStorage.request();
+        if (!result.isGranted) {
+          _error = 'يلزم السماح بالوصول إلى جميع الملفات من إعدادات Android لاستخدام متصفح الملفات داخل التطبيق.';
+          return;
+        }
+      }
+      if (!await _current.exists()) {
+        _current = Directory('/sdcard');
+      }
+      final entries = <FileSystemEntity>[];
+      await for (final entity in _current.list(followLinks: false)) {
+        final name = entity.uri.pathSegments.isEmpty ? entity.path : entity.uri.pathSegments.last;
+        if (name.startsWith('.')) continue;
+        entries.add(entity);
+      }
+      entries.sort((a, b) {
+        final ad = a is Directory ? 0 : 1;
+        final bd = b is Directory ? 0 : 1;
+        if (ad != bd) return ad.compareTo(bd);
+        return a.path.toLowerCase().compareTo(b.path.toLowerCase());
+      });
+      _entries = entries;
+    } catch (e) {
+      _error = 'تعذر فتح المجلد: $e';
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  String _name(FileSystemEntity entity) {
+    final path = entity.path.replaceAll('\\\\', '/').replaceAll(RegExp(r'/+$'), '');
+    final slash = path.lastIndexOf('/');
+    return slash >= 0 ? path.substring(slash + 1) : path;
+  }
+
+  Future<void> _open(Directory directory) async {
+    setState(() { _current = directory; });
+    await _load();
+  }
+
+  Future<void> _selectFolder(Directory directory) async {
+    setState(() { _loading = true; _error = null; });
+    var added = 0;
+    try {
+      await for (final entity in directory.list(recursive: true, followLinks: false)) {
+        if (entity is! File) continue;
+        if (entity.path.contains('/Android/data/') || entity.path.contains('/Android/obb/')) continue;
+        _selected.add(entity.path);
+        added++;
+      }
+      if (mounted) setState(() => _error = added == 0 ? 'لم يتم العثور على ملفات قابلة للقراءة داخل هذا المجلد.' : 'تم تحديد $added ملفًا من المجلد.');
+    } catch (e) {
+      if (mounted) setState(() => _error = 'تم تحديد ما أمكن قراءته من المجلد. بعض المسارات محمية من Android.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _toggleFile(File file) async {
+    if (_selected.contains(file.path)) {
+      setState(() => _selected.remove(file.path));
+      return;
+    }
+    setState(() => _selected.add(file.path));
+  }
+
+  @override
+  Widget build(BuildContext context) => Directionality(
+    textDirection: TextDirection.rtl,
+    child: Scaffold(
+      appBar: AppBar(
+        title: const Text('اختيار الملفات والمجلدات'),
+        leading: IconButton(
+          tooltip: 'رجوع',
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () async {
+            final parent = _current.parent;
+            if (parent.path != _current.path && await parent.exists()) {
+              await _open(parent);
+            } else if (context.mounted) {
+              Navigator.pop(context);
+            }
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: _selected.isEmpty ? null : () => Navigator.pop(context, _selected.map((path) => File(path)).where((file) => file.existsSync()).toList()),
+            child: Text('إضافة (${_selected.length})'),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: Text(_current.path, maxLines: 2, overflow: TextOverflow.ellipsis, textDirection: TextDirection.ltr),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(children: [
+              Text('تم تحديد ${_selected.length} ملف', style: const TextStyle(fontWeight: FontWeight.bold)),
+              const Spacer(),
+              TextButton(onPressed: _selected.isEmpty ? null : () => setState(_selected.clear), child: const Text('مسح التحديد')),
+            ]),
+          ),
+          if (_error != null)
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Text(_error!, style: const TextStyle(color: _nearbyRed))),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(color: _nearbyRed))
+                : _entries.isEmpty
+                    ? const Center(child: Text('هذا المجلد فارغ أو لا يمكن قراءته.'))
+                    : ListView.separated(
+                        itemCount: _entries.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final entity = _entries[index];
+                          final isDirectory = entity is Directory;
+                          final selected = !isDirectory && _selected.contains(entity.path);
+                          return ListTile(
+                            leading: Icon(isDirectory ? Icons.folder_rounded : Icons.insert_drive_file_outlined, color: isDirectory ? _nearbyRed : null),
+                            title: Text(_name(entity), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            subtitle: Text(isDirectory ? 'مجلد — اضغط للفتح أو اضغط مطولًا لتحديد محتوياته' : entity.path, maxLines: 1, overflow: TextOverflow.ellipsis, textDirection: isDirectory ? TextDirection.rtl : TextDirection.ltr),
+                            trailing: isDirectory
+                                ? const Icon(Icons.chevron_left_rounded)
+                                : Checkbox(value: selected, onChanged: (_) => _toggleFile(entity as File)),
+                            onTap: isDirectory ? () => _open(entity as Directory) : () => _toggleFile(entity as File),
+                            onLongPress: isDirectory ? () => _selectFolder(entity as Directory) : () => _toggleFile(entity as File),
+                          );
+                        },
+                      ),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: _nearbyRed, padding: const EdgeInsets.symmetric(vertical: 14)),
+                  onPressed: _selected.isEmpty ? null : () => Navigator.pop(context, _selected.map((path) => File(path)).where((file) => file.existsSync()).toList()),
                   icon: const Icon(Icons.add_rounded),
                   label: Text('إضافة الملفات المحددة (${_selected.length})'),
                 ),
