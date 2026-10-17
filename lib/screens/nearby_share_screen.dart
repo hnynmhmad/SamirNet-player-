@@ -59,38 +59,36 @@ class NearbyShareScreen extends StatelessWidget {
                 color: _shareRed,
                 background: const Color(0xFFFCE8E8),
                 icon: Icons.file_upload_outlined,
-                title: 'إرسال الملفات',
-                subtitle: 'اختر ملفاتك ثم امسح رمز جهاز الاستقبال',
-                onTap: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const _SendScreen())),
+                title: 'إرسال الملفات — مباشر دون إنترنت',
+                subtitle: 'اختر ملفاتك وابحث عن هاتف صديقك القريب',
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen(receiveMode: false))),
               ),
               const SizedBox(height: 14),
               _ActionCard(
                 color: _shareBlue,
                 background: const Color(0xFFE4EEFC),
                 icon: Icons.file_download_outlined,
-                title: 'استلام الملفات',
-                subtitle: 'اعرض رمز QR ليقوم صديقك بمسحه',
-                onTap: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const _ReceiveScreen())),
+                title: 'استلام الملفات — مباشر دون إنترنت',
+                subtitle: 'اجعل هاتفك ظاهرًا للأجهزة القريبة',
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen(receiveMode: true))),
               ),
               const SizedBox(height: 14),
               _ActionCard(
                 color: const Color(0xFF16866A),
                 background: const Color(0xFFE1F5ED),
                 icon: Icons.radar_rounded,
-                title: 'الأجهزة القريبة — إرسال مباشر',
-                subtitle: 'اكتشاف تلقائي ونقل دون إنترنت',
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen(receiveMode: false))),
+                title: 'إرسال عبر QR — شبكة محلية',
+                subtitle: 'بديل عند اتصال الهاتفين بشبكة Wi-Fi أو نقطة اتصال',
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _SendScreen())),
               ),
               const SizedBox(height: 14),
               _ActionCard(
                 color: const Color(0xFF3979D5),
                 background: const Color(0xFFE4EEFC),
                 icon: Icons.phonelink_ring_rounded,
-                title: 'استلام من جهاز قريب',
-                subtitle: 'اجعل هاتفك ظاهرًا للأجهزة القريبة',
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen(receiveMode: true))),
+                title: 'استلام عبر QR — شبكة محلية',
+                subtitle: 'اعرض رمز QR ليستلمه صديقك عبر الشبكة المحلية',
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _ReceiveScreen())),
               ),
               const SizedBox(height: 18),
               const ListTile(
@@ -618,7 +616,7 @@ class _ScanReceiverScreenState extends State<_ScanReceiverScreen> {
         body: Stack(
           children: [
             MobileScanner(
-              errorBuilder: (context, error) => Center(
+              errorBuilder: (context, error, child) => Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
                   child: Column(
