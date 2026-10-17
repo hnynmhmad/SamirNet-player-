@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -44,6 +45,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final Map<int, int> _progressTotals = {};
   final Map<int, String> _progressNames = {};
   final Map<int, DateTime> _progressStartedAt = {};
+  final ValueNotifier<int> _progressRevision = ValueNotifier<int>(0);
 
   bool _starting = false;
   bool _advertising = false;
@@ -271,6 +273,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       _receivedUris[payload.id] = payload.uri!;
       _tryFinalizeReceivedFile(payload.id);
     }
+    _progressRevision.value++;
   }
 
   void _onPayloadTransferUpdate(String endpointId, PayloadTransferUpdate update) {
@@ -287,8 +290,10 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
             : null;
         _status = 'جارٍ نقل ملف: ${_formatBytes(update.bytesTransferred)} من ${_formatBytes(update.totalBytes)} · ${_formatSpeed(speed)}${remaining == null ? '' : ' · متبقٍ ${_formatDuration(remaining)}'}';
       });
+      _progressRevision.value++;
     } else if (update.status == PayloadStatus.FAILURE) {
       setState(() => _error = 'فشل نقل أحد الملفات. افحص الاتصال ثم أعد المحاولة.');
+      _progressRevision.value++;
     } else if (update.status == PayloadStatus.SUCCESS) {
       _completedPayloads.add(update.id);
       _tryFinalizeReceivedFile(update.id);
@@ -298,6 +303,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         _progressStartedAt.putIfAbsent(update.id, DateTime.now);
         _status = 'اكتمل نقل ملف (${_formatBytes(update.totalBytes)}).';
       });
+      _progressRevision.value++;
     }
   }
 
@@ -573,6 +579,20 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       _status = 'جارٍ إرسال الملفات إلى الأجهزة المتصلة...';
       _error = null;
     });
+    _progressBytes.clear();
+    _progressTotals.clear();
+    _progressNames.clear();
+    _progressStartedAt.clear();
+    _progressRevision.value++;
+    unawaited(Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => TransferProgressScreen(
+        progressRevision: _progressRevision,
+        progressBytes: _progressBytes,
+        progressTotals: _progressTotals,
+        progressNames: _progressNames,
+        progressStartedAt: _progressStartedAt,
+      ),
+    )));
     final pending = List<File>.from(_queue);
     try {
       for (final file in pending) {
@@ -590,6 +610,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           _progressTotals.remove(metadataPayloadId);
           _progressNames.remove(metadataPayloadId);
           _progressStartedAt.remove(metadataPayloadId);
+          _progressRevision.value++;
         }
         if (mounted) setState(() => _queue.remove(file));
       }
@@ -630,6 +651,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   void dispose() {
     _nearby.stopAllEndpoints();
     _stopDiscoveryAndAdvertising();
+    _progressRevision.dispose();
     super.dispose();
   }
 
@@ -811,6 +833,96 @@ String _formatBytes(int bytes) {
   if (bytes >= 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
   return '$bytes B';
+}
+
+class TransferProgressScreen extends StatelessWidget {
+  const TransferProgressScreen({
+    super.key,
+    required this.progressRevision,
+    required this.progressBytes,
+    required this.progressTotals,
+    required this.progressNames,
+    required this.progressStartedAt,
+  });
+
+  final ValueListenable<int> progressRevision;
+  final Map<int, int> progressBytes;
+  final Map<int, int> progressTotals;
+  final Map<int, String> progressNames;
+  final Map<int, DateTime> progressStartedAt;
+
+  @override
+  Widget build(BuildContext context) => Directionality(
+    textDirection: TextDirection.rtl,
+    child: Scaffold(
+      appBar: AppBar(title: const Text('تقدم إرسال الملفات')),
+      body: ValueListenableBuilder<int>(
+        valueListenable: progressRevision,
+        builder: (context, _, __) {
+          final ids = progressTotals.keys.toList();
+          final sent = ids.fold<int>(0, (sum, id) => sum + (progressBytes[id] ?? 0));
+          final total = ids.fold<int>(0, (sum, id) => sum + (progressTotals[id] ?? 0));
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Card(
+                color: const Color(0xFFFFEEEE),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('إجمالي تقدم النقل', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                    const SizedBox(height: 8),
+                    Text('${_formatBytes(sent)} من ${_formatBytes(total)}'),
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(
+                      value: total <= 0 ? null : (sent / total).clamp(0.0, 1.0).toDouble(),
+                      color: _nearbyRed,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(ids.isEmpty ? 'بانتظار بدء نقل الملفات...' : 'عدد الملفات: ${ids.length}'),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text('تقدم كل ملف', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+              if (ids.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(18),
+                  child: Center(child: Text('جارٍ تجهيز الملفات للاتصال...')),
+                ),
+              ...ids.map((id) {
+                final fileSent = progressBytes[id] ?? 0;
+                final fileTotal = progressTotals[id] ?? 0;
+                final started = progressStartedAt[id];
+                final elapsed = started == null ? 0.0 : DateTime.now().difference(started).inMilliseconds / 1000.0;
+                final speed = elapsed > 0 ? fileSent / elapsed : 0.0;
+                final remaining = speed > 0 && fileTotal > fileSent
+                    ? Duration(seconds: ((fileTotal - fileSent) / speed).round())
+                    : null;
+                return Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(progressNames[id] ?? 'ملف $id', maxLines: 2, overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 5),
+                      Text('${_formatBytes(fileSent)} من ${_formatBytes(fileTotal)} · ${_formatSpeed(speed)}${remaining == null ? '' : ' · متبقٍ ${_formatDuration(remaining)}'}'),
+                      const SizedBox(height: 6),
+                      LinearProgressIndicator(
+                        value: fileTotal <= 0 ? null : (fileSent / fileTotal).clamp(0.0, 1.0).toDouble(),
+                        color: _nearbyRed,
+                      ),
+                    ]),
+                  ),
+                );
+              }),
+              const SizedBox(height: 16),
+              const Text('اترك هذه الصفحة مفتوحة حتى يكتمل الإرسال. يمكنك الرجوع للشاشة السابقة بعد ذلك.', style: TextStyle(color: Colors.grey)),
+            ],
+          );
+        },
+      ),
+    ),
+  );
 }
 
 class DeviceStoragePickerScreen extends StatefulWidget {
