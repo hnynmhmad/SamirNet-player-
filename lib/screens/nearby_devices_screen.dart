@@ -492,8 +492,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                 ),
               ]),
             ),
-          ),
-        );
+          );
           },
         );
       } finally {
