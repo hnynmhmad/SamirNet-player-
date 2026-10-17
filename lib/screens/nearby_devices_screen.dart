@@ -36,6 +36,9 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final Map<int, String> _receivedUris = {};
   final Map<int, String> _receivedDigests = {};
   final Set<int> _completedPayloads = {};
+  // Metadata is sent as a tiny BYTES payload beside each actual file. It is
+  // protocol data, not a user file, so never show it in file progress.
+  final Set<int> _metadataPayloads = {};
   final Set<int> _finalizingPayloads = {};
   final Map<int, int> _progressBytes = {};
   final Map<int, int> _progressTotals = {};
@@ -237,6 +240,11 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   void _onPayloadReceived(String endpointId, Payload payload) {
     if (!mounted) return;
     if (payload.type == PayloadType.BYTES && payload.bytes != null) {
+      _metadataPayloads.add(payload.id);
+      _progressBytes.remove(payload.id);
+      _progressTotals.remove(payload.id);
+      _progressNames.remove(payload.id);
+      _progressStartedAt.remove(payload.id);
       final message = utf8.decode(payload.bytes!, allowMalformed: true);
       if (message.startsWith('SMFILE1|')) {
         final parts = message.split('|');
@@ -266,7 +274,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   }
 
   void _onPayloadTransferUpdate(String endpointId, PayloadTransferUpdate update) {
-    if (!mounted) return;
+    if (!mounted || _metadataPayloads.contains(update.id)) return;
     if (update.status == PayloadStatus.IN_PROGRESS) {
       setState(() {
         _progressBytes[update.id] = update.bytesTransferred;
@@ -387,7 +395,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       if (!mounted) return;
 
       final controller = MobileScannerController(
-        autoStart: false,
         facing: CameraFacing.back,
         detectionSpeed: DetectionSpeed.noDuplicates,
         formats: const [BarcodeFormat.qrCode],
@@ -396,19 +403,9 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         await showDialog<void>(
           context: context,
           builder: (dialogContext) {
-            // Start only after the dialog and scanner view have entered the tree.
-            // This avoids CameraX initialization racing the route transition.
-            WidgetsBinding.instance.addPostFrameCallback((_) async {
-              if (!dialogContext.mounted) return;
-              try {
-                await controller.start();
-              } catch (cameraError) {
-                if (mounted) {
-                  setState(() => _error =
-                      'تعذر تهيئة الكاميرا لمسح QR: $cameraError. تحقق من أذونات الكاميرا ثم أعد المحاولة.');
-                }
-              }
-            });
+            // Let MobileScanner own camera lifecycle. Manually starting the
+            // controller during route animation can cause CameraX genericError
+            // on some Android devices.
             return Dialog(
             insetPadding: const EdgeInsets.all(18),
             child: SizedBox(
@@ -584,10 +581,15 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           final payloadId = await _nearby.sendFilePayload(endpointId, file.path);
           _progressNames[payloadId] = file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last;
           final digest = (await sha256.bind(file.openRead()).first).toString();
-          await _nearby.sendBytesPayload(
+          final metadataPayloadId = await _nearby.sendBytesPayload(
             endpointId,
             Uint8List.fromList(utf8.encode('SMFILE1|$payloadId|${Uri.encodeComponent(file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last)}|$digest')),
           );
+          _metadataPayloads.add(metadataPayloadId);
+          _progressBytes.remove(metadataPayloadId);
+          _progressTotals.remove(metadataPayloadId);
+          _progressNames.remove(metadataPayloadId);
+          _progressStartedAt.remove(metadataPayloadId);
         }
         if (mounted) setState(() => _queue.remove(file));
       }
