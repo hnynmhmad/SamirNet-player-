@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -600,16 +601,10 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           final payloadId = await _nearby.sendFilePayload(endpointId, file.path);
           _progressNames[payloadId] = file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last;
           final digest = (await sha256.bind(file.openRead()).first).toString();
-          final metadataPayloadId = await _nearby.sendBytesPayload(
+          await _nearby.sendBytesPayload(
             endpointId,
             Uint8List.fromList(utf8.encode('SMFILE1|$payloadId|${Uri.encodeComponent(file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last)}|$digest')),
           );
-          _metadataPayloads.add(metadataPayloadId);
-          _progressBytes.remove(metadataPayloadId);
-          _progressTotals.remove(metadataPayloadId);
-          _progressNames.remove(metadataPayloadId);
-          _progressStartedAt.remove(metadataPayloadId);
-          _progressRevision.value++;
         }
         if (mounted) setState(() => _queue.remove(file));
       }
