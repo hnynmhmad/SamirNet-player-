@@ -275,7 +275,7 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
         Expanded(child: _assetList(_albumVideos, empty: 'هذا المجلد لا يحتوي على فيديوهات.')),
       ]);
     }
-    final albums = _videoAlbums.where((a) => a.name.toLowerCase() != 'recent').toList();
+    final albums = _videoAlbums.where((a) => !a.isAll && a.name.toLowerCase() != 'recent').toList();
     if (albums.isEmpty) return const Center(child: Text('لا توجد مجلدات فيديو.'));
     return ListView.separated(
       itemCount: albums.length,
