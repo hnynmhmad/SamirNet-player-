@@ -43,6 +43,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   // sendBytesPayload has no returned payload ID, so identify our tiny protocol
   // metadata updates by their exact encoded byte lengths on the sending device.
   final Set<int> _metadataPayloadSizes = {};
+  final Set<int> _outgoingFilePayloads = {};
   final Set<int> _finalizingPayloads = {};
   final Map<int, int> _progressBytes = {};
   final Map<int, int> _progressTotals = {};
@@ -280,7 +281,9 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
 
   void _onPayloadTransferUpdate(String endpointId, PayloadTransferUpdate update) {
     if (!mounted || _metadataPayloads.contains(update.id) ||
-        (update.totalBytes < 1024 && _metadataPayloadSizes.contains(update.totalBytes))) return;
+        (!_outgoingFilePayloads.contains(update.id) &&
+            update.totalBytes < 1024 &&
+            _metadataPayloadSizes.contains(update.totalBytes))) return;
     if (update.status == PayloadStatus.IN_PROGRESS) {
       setState(() {
         _progressBytes[update.id] = update.bytesTransferred;
@@ -520,6 +523,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         if (!await file.exists()) continue;
         for (final endpointId in _connected.keys.toList()) {
           final payloadId = await _nearby.sendFilePayload(endpointId, file.path);
+          _outgoingFilePayloads.add(payloadId);
           _progressNames[payloadId] = file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last;
           final digest = (await sha256.bind(file.openRead()).first).toString();
           final metadataBytes = Uint8List.fromList(utf8.encode(
