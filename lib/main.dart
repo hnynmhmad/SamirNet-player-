@@ -187,9 +187,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void dispose() { search.dispose(); super.dispose(); }
   Future<void> _loadLocal() async {
-    final p = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() { favorites = (p.getStringList('favorites') ?? []).toSet(); history = p.getStringList('history') ?? []; backgroundMode = p.getString('background_mode') ?? 'audio'; videoSort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('global_media_grid') ?? p.getBool('video_grid') ?? true; foldersGrid = p.getBool('global_media_grid') ?? p.getBool('folders_grid') ?? false; newMediaIds = (p.getStringList('new_media_ids') ?? []).toSet(); seenFolderPaths = (p.getStringList('seen_folder_paths') ?? []).toSet(); });
+    try {
+      final p = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        favorites = (p.getStringList('favorites') ?? []).toSet();
+        history = p.getStringList('history') ?? [];
+        backgroundMode = p.getString('background_mode') ?? 'audio';
+        videoSort = p.getString('video_sort') ?? 'dateDesc';
+        grid = p.getBool('global_media_grid') ?? p.getBool('video_grid') ?? true;
+        foldersGrid = p.getBool('global_media_grid') ?? p.getBool('folders_grid') ?? false;
+        newMediaIds = (p.getStringList('new_media_ids') ?? []).toSet();
+        seenFolderPaths = (p.getStringList('seen_folder_paths') ?? []).toSet();
+      });
+    } catch (error, stack) {
+      // Local preferences are optional; the media library must remain usable.
+      debugPrint('Could not load local preferences: $error\\n$stack');
+    }
   }
   Future<void> _openPermissionSettings() async {
     try {
@@ -215,15 +229,29 @@ class _LibraryScreenState extends State<LibraryScreen> {
           assets.addAll(await all.getAssetListRange(start: start, end: (start + 200).clamp(0, total).toInt()));
         }
       }
-      final prefs = await SharedPreferences.getInstance();
-      final previousIds = (prefs.getStringList('known_media_ids') ?? []).toSet();
-      final currentIds = assets.map((asset) => asset.id).toSet();
-      final discovered = previousIds.isEmpty ? <String>{} : currentIds.difference(previousIds);
-      final retainedNew = (prefs.getStringList('new_media_ids') ?? []).toSet().intersection(currentIds);
-      retainedNew.addAll(discovered);
-      await prefs.setStringList('known_media_ids', currentIds.toList());
-      await prefs.setStringList('new_media_ids', retainedNew.toList());
-      if (mounted) setState(() { videos = assets.map(MediaEntry.new).toList(); newMediaIds = retainedNew; loading = false; denied = false; scanError = null; });
+      // Publish media results before touching preferences. A SharedPreferences
+      // platform-channel failure must never make a valid media scan look empty.
+      if (mounted) {
+        setState(() {
+          videos = assets.map(MediaEntry.new).toList();
+          loading = false;
+          denied = false;
+          scanError = null;
+        });
+      }
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final previousIds = (prefs.getStringList('known_media_ids') ?? []).toSet();
+        final currentIds = assets.map((asset) => asset.id).toSet();
+        final discovered = previousIds.isEmpty ? <String>{} : currentIds.difference(previousIds);
+        final retainedNew = (prefs.getStringList('new_media_ids') ?? []).toSet().intersection(currentIds);
+        retainedNew.addAll(discovered);
+        await prefs.setStringList('known_media_ids', currentIds.toList());
+        await prefs.setStringList('new_media_ids', retainedNew.toList());
+        if (mounted) setState(() => newMediaIds = retainedNew);
+      } catch (prefsError, prefsStack) {
+        debugPrint('Media loaded, but optional preference bookkeeping failed: $prefsError\\n$prefsStack');
+      }
     } catch (error, stack) {
       debugPrint('SamirNet media scan failed: $error\\n$stack');
       if (mounted) setState(() { loading = false; denied = false; scanError = 'تعذر فحص مكتبة الفيديوهات: $error'; });
@@ -620,8 +648,17 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
     }
   }
   Future<void> _load() async {
-    final viewPrefs = await SharedPreferences.getInstance();
-    if (mounted) setState(() { grid = viewPrefs.getBool('global_media_grid') ?? true; sort = viewPrefs.getString('video_sort') ?? 'dateDesc'; });
+    // Preferences must not block audio discovery. Some Android installs may
+    // have a stale SharedPreferences platform implementation after an upgrade.
+    try {
+      final viewPrefs = await SharedPreferences.getInstance();
+      if (mounted) setState(() {
+        grid = viewPrefs.getBool('global_media_grid') ?? true;
+        sort = viewPrefs.getString('video_sort') ?? 'dateDesc';
+      });
+    } catch (prefsError, prefsStack) {
+      debugPrint('Audio library will load without view preferences: $prefsError\\n$prefsStack');
+    }
     if (mounted) setState(() { loading = true; error = null; });
     try {
       final permission = await PhotoManager.requestPermissionExtend(requestOption: const PermissionRequestOption(androidPermission: AndroidPermission(type: RequestType.audio, mediaLocation: false)));
