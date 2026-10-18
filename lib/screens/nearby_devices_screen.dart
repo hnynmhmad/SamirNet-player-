@@ -280,10 +280,13 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   }
 
   void _onPayloadTransferUpdate(String endpointId, PayloadTransferUpdate update) {
-    if (!mounted || _metadataPayloads.contains(update.id) ||
+    if (!mounted ||
+        _metadataPayloads.contains(update.id) ||
         (!_outgoingFilePayloads.contains(update.id) &&
             update.totalBytes < 1024 &&
-            _metadataPayloadSizes.contains(update.totalBytes))) return;
+            _metadataPayloadSizes.contains(update.totalBytes))) {
+      return;
+    }
     if (update.status == PayloadStatus.IN_PROGRESS) {
       setState(() {
         _progressBytes[update.id] = update.bytesTransferred;
