@@ -770,7 +770,7 @@ class _QrScannerPageState extends State<_QrScannerPage> {
       }
 
       final previous = _controller;
-      _controller = null;
+      if (mounted) setState(() => _controller = null);
       if (previous != null) {
         try {
           await previous.stop();
