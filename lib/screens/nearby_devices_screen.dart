@@ -800,8 +800,7 @@ class _QrScannerPageState extends State<_QrScannerPage> {
       if (mounted) {
         setState(() {
           _cameraError =
-              'تعذر تهيئة الكاميرا: ' + error.toString() +
-              '. أغلق ماسح QR ثم أعد فتحه. إذا استمر الخطأ، أعد تشغيل الهاتف وتحقق من تحديث مكونات نظام Android.';
+              'تعذر تهيئة الكاميرا: $error. أغلق ماسح QR ثم أعد فتحه. إذا استمر الخطأ، أعد تشغيل الهاتف وتحقق من تحديث مكونات نظام Android.';
         });
       }
     } finally {
@@ -890,7 +889,7 @@ class _QrScannerPageState extends State<_QrScannerPage> {
                                         error.errorCode == MobileScannerErrorCode.permissionDenied
                                             ? 'إذن الكاميرا غير متاح. افتح إعدادات التطبيق واسمح باستخدام الكاميرا.'
                                             : (_cameraError ??
-                                                'تعذر تشغيل الكاميرا (' + error.errorCode.name + '). أعدنا تهيئة جلسة الكاميرا؛ إذا استمر الخطأ فقد تكون المشكلة من توافق CameraX مع هذا الجهاز.'),
+                                                'تعذر تشغيل الكاميرا (${error.errorCode.name}). أعدنا تهيئة جلسة الكاميرا؛ إذا استمر الخطأ فقد تكون المشكلة من توافق CameraX مع هذا الجهاز.'),
                                         textAlign: TextAlign.center,
                                       ),
                                       const SizedBox(height: 16),
