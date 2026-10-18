@@ -735,42 +735,91 @@ class _QrScannerPage extends StatefulWidget {
 }
 
 class _QrScannerPageState extends State<_QrScannerPage> {
-  late final MobileScannerController _controller;
-  bool _retrying = false;
+  MobileScannerController? _controller;
+  bool _starting = false;
+  bool _handled = false;
   String? _cameraError;
 
   @override
   void initState() {
     super.initState();
-    _controller = MobileScannerController(
-      autoStart: true,
-      facing: CameraFacing.back,
-      detectionSpeed: DetectionSpeed.noDuplicates,
-      formats: const [BarcodeFormat.qrCode],
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startCamera());
   }
 
-  Future<void> _retryCamera() async {
-    if (_retrying) return;
-    setState(() { _retrying = true; _cameraError = null; });
+  Future<void> _startCamera() async {
+    if (_starting || !mounted) return;
+    setState(() {
+      _starting = true;
+      _cameraError = null;
+    });
+    MobileScannerController? nextController;
     try {
-      await _controller.stop();
-      await Future<void>.delayed(const Duration(milliseconds: 700));
-      if (!mounted) return;
-      await _controller.start();
+      var cameraPermission = await Permission.camera.status;
+      if (!cameraPermission.isGranted) {
+        cameraPermission = await Permission.camera.request();
+      }
+      if (!cameraPermission.isGranted) {
+        if (mounted) {
+          setState(() {
+            _cameraError = cameraPermission.isPermanentlyDenied
+                ? 'إذن الكاميرا مرفوض نهائيًا. افتح إعدادات التطبيق ثم الأذونات ثم الكاميرا واسمح بها.'
+                : 'لم يُمنح إذن الكاميرا. اسمح للتطبيق باستخدام الكاميرا ثم اضغط إعادة المحاولة.';
+          });
+        }
+        return;
+      }
+
+      final previous = _controller;
+      _controller = null;
+      if (previous != null) {
+        try {
+          await previous.stop();
+        } catch (_) {
+          // Continue with a fresh controller if the native session is unhealthy.
+        }
+        try {
+          await previous.dispose();
+        } catch (_) {
+          // Best-effort disposal before rebuilding the camera session.
+        }
+      }
+
+      // Recreate CameraX instead of calling start() on a failed controller.
+      nextController = MobileScannerController(
+        autoStart: false,
+        facing: CameraFacing.back,
+        detectionSpeed: DetectionSpeed.noDuplicates,
+        formats: const [BarcodeFormat.qrCode],
+      );
+      if (!mounted) {
+        await nextController.dispose();
+        return;
+      }
+      setState(() => _controller = nextController);
+      await nextController.start();
     } catch (error) {
       if (mounted) {
-        setState(() => _cameraError =
-            'تعذر إعادة تهيئة الكاميرا: $error. تحقق من إذن الكاميرا ثم حاول مرة أخرى.');
+        setState(() {
+          _cameraError =
+              'تعذر تهيئة الكاميرا: ' + error.toString() +
+              '. أغلق ماسح QR ثم أعد فتحه. إذا استمر الخطأ، أعد تشغيل الهاتف وتحقق من تحديث مكونات نظام Android.';
+        });
       }
     } finally {
-      if (mounted) setState(() => _retrying = false);
+      if (mounted) setState(() => _starting = false);
     }
   }
 
+  Future<void> _retryCamera() => _startCamera();
+
   @override
   void dispose() {
-    _controller.dispose();
+    final controller = _controller;
+    _controller = null;
+    if (controller != null) {
+      unawaited(controller.stop().catchError((Object _) {}));
+      unawaited(controller.dispose());
+    }
     super.dispose();
   }
 
@@ -800,48 +849,78 @@ class _QrScannerPageState extends State<_QrScannerPage> {
                     padding: const EdgeInsets.all(16),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(20),
-                      child: MobileScanner(
-                        controller: _controller,
-                        errorBuilder: (context, error, child) => Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.no_photography_outlined, size: 52),
-                                const SizedBox(height: 16),
-                                Text(
-                                  error.errorCode == MobileScannerErrorCode.permissionDenied
-                                      ? 'إذن الكاميرا غير متاح. افتح إعدادات التطبيق واسمح باستخدام الكاميرا.'
-                                      : 'تعذر تشغيل الكاميرا (${error.errorCode.name}). قد يكون السبب تعارضًا في تهيئة الكاميرا أو مشكلة من Android CameraX.',
-                                  textAlign: TextAlign.center,
-                                ),
-                                if (_cameraError != null) ...[
-                                  const SizedBox(height: 8),
-                                  Text(_cameraError!, textAlign: TextAlign.center),
+                      child: _controller == null
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (_starting)
+                                    const CircularProgressIndicator()
+                                  else
+                                    const Icon(Icons.no_photography_outlined, size: 52),
+                                  const SizedBox(height: 16),
+                                  if (_cameraError != null)
+                                    Padding(
+                                      padding: const EdgeInsets.all(16),
+                                      child: Text(_cameraError!, textAlign: TextAlign.center),
+                                    ),
+                                  FilledButton.icon(
+                                    onPressed: _starting ? null : _retryCamera,
+                                    icon: const Icon(Icons.refresh_rounded),
+                                    label: const Text('إعادة تهيئة الكاميرا'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () => openAppSettings(),
+                                    child: const Text('فتح إعدادات أذونات التطبيق'),
+                                  ),
                                 ],
-                                const SizedBox(height: 16),
-                                FilledButton.icon(
-                                  onPressed: _retrying ? null : _retryCamera,
-                                  icon: _retrying
-                                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                                      : const Icon(Icons.refresh_rounded),
-                                  label: Text(_retrying ? 'جارٍ إعادة تشغيل الكاميرا...' : 'إعادة محاولة تشغيل الكاميرا'),
+                              ),
+                            )
+                          : MobileScanner(
+                              key: ObjectKey(_controller),
+                              controller: _controller!,
+                              errorBuilder: (context, error, child) => Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(24),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.no_photography_outlined, size: 52),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        error.errorCode == MobileScannerErrorCode.permissionDenied
+                                            ? 'إذن الكاميرا غير متاح. افتح إعدادات التطبيق واسمح باستخدام الكاميرا.'
+                                            : (_cameraError ??
+                                                'تعذر تشغيل الكاميرا (' + error.errorCode.name + '). أعدنا تهيئة جلسة الكاميرا؛ إذا استمر الخطأ فقد تكون المشكلة من توافق CameraX مع هذا الجهاز.'),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                      const SizedBox(height: 16),
+                                      FilledButton.icon(
+                                        onPressed: _starting ? null : _retryCamera,
+                                        icon: _starting
+                                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                            : const Icon(Icons.refresh_rounded),
+                                        label: Text(_starting ? 'جارٍ تهيئة الكاميرا...' : 'إعادة تهيئة الكاميرا'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () => openAppSettings(),
+                                        child: const Text('إعدادات أذونات الكاميرا'),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ],
+                              ),
+                              onDetect: (capture) {
+                                if (_handled || capture.barcodes.isEmpty) return;
+                                final value = capture.barcodes.first.rawValue;
+                                if (value == null || !value.startsWith('SMPLAYER|')) return;
+                                final target = value.substring('SMPLAYER|'.length).trim();
+                                if (target.isNotEmpty && mounted) {
+                                  _handled = true;
+                                  Navigator.of(context).pop(target);
+                                }
+                              },
                             ),
-                          ),
-                        ),
-                        onDetect: (capture) {
-                          if (capture.barcodes.isEmpty) return;
-                          final value = capture.barcodes.first.rawValue;
-                          if (value == null || !value.startsWith('SMPLAYER|')) return;
-                          final target = value.substring('SMPLAYER|'.length).trim();
-                          if (target.isNotEmpty && mounted) {
-                            Navigator.of(context).pop(target);
-                          }
-                        },
-                      ),
                     ),
                   ),
                 ),
