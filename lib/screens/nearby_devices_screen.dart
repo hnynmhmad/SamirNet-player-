@@ -9,7 +9,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:camera/camera.dart';
+import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'transfer_media_picker_screen.dart';
 
@@ -725,8 +726,8 @@ String _formatBytes(int bytes) {
   return '$bytes B';
 }
 
-/// Full-screen QR scanner. MobileScanner owns its automatic lifecycle on
-/// this route; the controller is restarted only after an explicit user retry.
+/// Full-screen QR scanner using Flutter's CameraX-backed Android camera plugin
+/// and ML Kit for QR decoding. A fresh controller is created on every retry.
 class _QrScannerPage extends StatefulWidget {
   const _QrScannerPage();
 
@@ -734,73 +735,87 @@ class _QrScannerPage extends StatefulWidget {
   State<_QrScannerPage> createState() => _QrScannerPageState();
 }
 
-class _QrScannerPageState extends State<_QrScannerPage> {
-  MobileScannerController? _controller;
+class _QrScannerPageState extends State<_QrScannerPage> with WidgetsBindingObserver {
+  CameraController? _cameraController;
+  final BarcodeScanner _barcodeScanner = BarcodeScanner(
+    formats: const [BarcodeFormat.qrCode],
+  );
   bool _starting = false;
+  bool _processingFrame = false;
   bool _handled = false;
   String? _cameraError;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _startCamera());
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      unawaited(_disposeCamera());
+    } else if (state == AppLifecycleState.resumed && !_handled && _cameraController == null) {
+      unawaited(_startCamera());
+    }
+  }
+
+  Future<void> _disposeCamera() async {
+    final old = _cameraController;
+    _cameraController = null;
+    if (mounted) setState(() {});
+    if (old != null) {
+      try {
+        if (old.value.isStreamingImages) await old.stopImageStream();
+      } catch (_) {}
+      try {
+        await old.dispose();
+      } catch (_) {}
+    }
+  }
+
   Future<void> _startCamera() async {
-    if (_starting || !mounted) return;
+    if (_starting || !mounted || _handled) return;
     setState(() {
       _starting = true;
       _cameraError = null;
     });
+    await _disposeCamera();
     try {
-      var cameraPermission = await Permission.camera.status;
-      if (!cameraPermission.isGranted) {
-        cameraPermission = await Permission.camera.request();
-      }
-      if (!cameraPermission.isGranted) {
-        if (mounted) {
-          setState(() {
-            _cameraError = cameraPermission.isPermanentlyDenied
-                ? 'إذن الكاميرا مرفوض نهائيًا. افتح إعدادات التطبيق ثم الأذونات ثم الكاميرا واسمح بها.'
-                : 'لم يُمنح إذن الكاميرا. اسمح للتطبيق باستخدام الكاميرا ثم اضغط إعادة المحاولة.';
-          });
-        }
-        return;
+      var permission = await Permission.camera.status;
+      if (!permission.isGranted) permission = await Permission.camera.request();
+      if (!permission.isGranted) {
+        throw Exception(permission.isPermanentlyDenied
+            ? 'إذن الكاميرا مرفوض نهائيًا. افتح إعدادات التطبيق واسمح باستخدام الكاميرا.'
+            : 'لم يُمنح إذن الكاميرا.');
       }
 
-      final previous = _controller;
-      if (mounted) setState(() => _controller = null);
-      if (previous != null) {
-        try {
-          await previous.stop();
-        } catch (_) {
-          // Continue with a fresh controller if the native session is unhealthy.
-        }
-        try {
-          await previous.dispose();
-        } catch (_) {
-          // Best-effort disposal before rebuilding the camera session.
-        }
-      }
-
-      // Recreate CameraX instead of calling start() on a failed controller.
-      final nextController = MobileScannerController(
-        autoStart: false,
-        facing: CameraFacing.back,
-        detectionSpeed: DetectionSpeed.noDuplicates,
-        formats: const [BarcodeFormat.qrCode],
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) throw Exception('لم يعثر Android على كاميرا متاحة.');
+      final selected = cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.back,
+        orElse: () => cameras.first,
       );
-      if (!mounted) {
-        await nextController.dispose();
+      final controller = CameraController(
+        selected,
+        ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.yuv420,
+      );
+      await controller.initialize();
+      if (!mounted || _handled) {
+        await controller.dispose();
         return;
       }
-      setState(() => _controller = nextController);
-      await nextController.start();
+      _cameraController = controller;
+      await controller.startImageStream(_processCameraImage);
+      if (mounted) setState(() {});
     } catch (error) {
+      await _disposeCamera();
       if (mounted) {
         setState(() {
-          _cameraError =
-              'تعذر تهيئة الكاميرا: $error. أغلق ماسح QR ثم أعد فتحه. إذا استمر الخطأ، أعد تشغيل الهاتف وتحقق من تحديث مكونات نظام Android.';
+          _cameraError = 'تعذر تشغيل CameraX: $error';
         });
       }
     } finally {
@@ -808,129 +823,139 @@ class _QrScannerPageState extends State<_QrScannerPage> {
     }
   }
 
-  Future<void> _retryCamera() => _startCamera();
+  Future<void> _processCameraImage(CameraImage image) async {
+    if (_processingFrame || _handled || !mounted) return;
+    _processingFrame = true;
+    try {
+      final controller = _cameraController;
+      if (controller == null || !controller.value.isInitialized) return;
+      final rotation = InputImageRotationValue.fromRawValue(
+        controller.description.sensorOrientation,
+      );
+      final format = InputImageFormatValue.fromRawValue(image.format.raw);
+      if (rotation == null || format == null) return;
+
+      final bytes = WriteBuffer();
+      for (final plane in image.planes) {
+        bytes.putUint8List(plane.bytes);
+      }
+      final inputImage = InputImage.fromBytes(
+        bytes: bytes.done().buffer.asUint8List(),
+        metadata: InputImageMetadata(
+          size: Size(image.width.toDouble(), image.height.toDouble()),
+          rotation: rotation,
+          format: format,
+          bytesPerRow: image.planes.first.bytesPerRow,
+        ),
+      );
+      final barcodes = await _barcodeScanner.processImage(inputImage);
+      for (final barcode in barcodes) {
+        final value = barcode.rawValue;
+        if (value == null || !value.startsWith('SMPLAYER|')) continue;
+        final target = value.substring('SMPLAYER|'.length).trim();
+        if (target.isNotEmpty && mounted && !_handled) {
+          _handled = true;
+          await _disposeCamera();
+          if (mounted) Navigator.of(context).pop(target);
+          return;
+        }
+      }
+    } catch (error) {
+      // A single malformed camera frame must not stop the preview or scanning.
+      debugPrint('QR frame analysis failed: $error');
+    } finally {
+      _processingFrame = false;
+    }
+  }
+
+  Future<void> _retryCamera() async {
+    _handled = false;
+    await _startCamera();
+  }
 
   @override
   void dispose() {
-    final controller = _controller;
-    _controller = null;
-    if (controller != null) {
-      unawaited(controller.stop().catchError((Object _) {}));
-      unawaited(controller.dispose());
-    }
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(_disposeCamera());
+    unawaited(_barcodeScanner.close());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => Directionality(
-        textDirection: TextDirection.rtl,
-        child: Scaffold(
-          appBar: AppBar(
-            title: const Text('مسح رمز QR'),
-            leading: IconButton(
-              onPressed: () => Navigator.of(context).pop(),
-              icon: const Icon(Icons.close),
-            ),
-          ),
-          body: SafeArea(
-            child: Column(
-              children: [
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text(
-                    'وجّه الكاميرا نحو رمز SM Player على الهاتف المستقبِل.',
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(20),
-                      child: _controller == null
-                          ? Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_starting)
-                                    const CircularProgressIndicator()
-                                  else
-                                    const Icon(Icons.no_photography_outlined, size: 52),
-                                  const SizedBox(height: 16),
-                                  if (_cameraError != null)
-                                    Padding(
-                                      padding: const EdgeInsets.all(16),
-                                      child: Text(_cameraError!, textAlign: TextAlign.center),
-                                    ),
-                                  FilledButton.icon(
-                                    onPressed: _starting ? null : _retryCamera,
-                                    icon: const Icon(Icons.refresh_rounded),
-                                    label: const Text('إعادة تهيئة الكاميرا'),
-                                  ),
-                                  TextButton(
-                                    onPressed: () => openAppSettings(),
-                                    child: const Text('فتح إعدادات أذونات التطبيق'),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : MobileScanner(
-                              key: ObjectKey(_controller),
-                              controller: _controller!,
-                              errorBuilder: (context, error, child) => Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(24),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.no_photography_outlined, size: 52),
-                                      const SizedBox(height: 16),
-                                      Text(
-                                        error.errorCode == MobileScannerErrorCode.permissionDenied
-                                            ? 'إذن الكاميرا غير متاح. افتح إعدادات التطبيق واسمح باستخدام الكاميرا.'
-                                            : (_cameraError ??
-                                                'تعذر تشغيل الكاميرا (${error.errorCode.name}). أعدنا تهيئة جلسة الكاميرا؛ إذا استمر الخطأ فقد تكون المشكلة من توافق CameraX مع هذا الجهاز.'),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                      const SizedBox(height: 16),
-                                      FilledButton.icon(
-                                        onPressed: _starting ? null : _retryCamera,
-                                        icon: _starting
-                                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                                            : const Icon(Icons.refresh_rounded),
-                                        label: Text(_starting ? 'جارٍ تهيئة الكاميرا...' : 'إعادة تهيئة الكاميرا'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () => openAppSettings(),
-                                        child: const Text('إعدادات أذونات الكاميرا'),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              onDetect: (capture) {
-                                if (_handled || capture.barcodes.isEmpty) return;
-                                final value = capture.barcodes.first.rawValue;
-                                if (value == null || !value.startsWith('SMPLAYER|')) return;
-                                final target = value.substring('SMPLAYER|'.length).trim();
-                                if (target.isNotEmpty && mounted) {
-                                  _handled = true;
-                                  Navigator.of(context).pop(target);
-                                }
-                              },
-                            ),
-                    ),
-                  ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('يتم الاتصال مباشرة بين الهاتفين ولا يلزم الإنترنت.'),
-                ),
-              ],
-            ),
-          ),
+    textDirection: TextDirection.rtl,
+    child: Scaffold(
+      appBar: AppBar(
+        title: const Text('مسح رمز QR'),
+        leading: IconButton(
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.close),
         ),
-      );
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'وجّه الكاميرا نحو رمز SM Player على الهاتف المستقبِل.',
+                textAlign: TextAlign.center,
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: _cameraController != null &&
+                          _cameraController!.value.isInitialized &&
+                          _cameraController!.value.previewSize != null
+                      ? CameraPreview(_cameraController!)
+                      : Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (_starting)
+                                  const CircularProgressIndicator()
+                                else
+                                  const Icon(Icons.no_photography_outlined, size: 52),
+                                const SizedBox(height: 16),
+                                if (_cameraError != null)
+                                  Text(_cameraError!, textAlign: TextAlign.center),
+                                const SizedBox(height: 16),
+                                FilledButton.icon(
+                                  onPressed: _starting ? null : _retryCamera,
+                                  icon: _starting
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.refresh_rounded),
+                                  label: Text(_starting ? 'جارٍ تشغيل الكاميرا...' : 'إعادة تشغيل الكاميرا'),
+                                ),
+                                TextButton(
+                                  onPressed: () => openAppSettings(),
+                                  child: const Text('إعدادات أذونات الكاميرا'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('يتم الاتصال مباشرة بين الهاتفين ولا يلزم الإنترنت.'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class TransferProgressScreen extends StatelessWidget {
