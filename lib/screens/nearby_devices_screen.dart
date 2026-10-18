@@ -392,122 +392,30 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
               ? 'إذن الكاميرا مرفوض نهائيًا. افتح إعدادات التطبيق واسمح باستخدام الكاميرا.'
               : 'يجب السماح باستخدام الكاميرا لمسح رمز QR.');
         }
-        if (cameraPermission.isPermanentlyDenied) {
-          await openAppSettings();
-        }
+        if (cameraPermission.isPermanentlyDenied) await openAppSettings();
         return;
       }
-
       if (!mounted) return;
-
-      final controller = MobileScannerController(
-        autoStart: false,
-        facing: CameraFacing.back,
-        detectionSpeed: DetectionSpeed.noDuplicates,
-        formats: const [BarcodeFormat.qrCode],
+      final target = await Navigator.of(context).push<String>(
+        MaterialPageRoute<String>(
+          fullscreenDialog: true,
+          builder: (_) => const _QrScannerPage(),
+        ),
       );
-      try {
-        await showDialog<void>(
-          context: context,
-          builder: (dialogContext) {
-            // Start the camera only after the dialog has mounted, avoiding
-            // a CameraX start racing with the route transition.
-            WidgetsBinding.instance.addPostFrameCallback((_) async {
-              if (!dialogContext.mounted) return;
-              try {
-                await controller.start();
-              } catch (cameraError) {
-                if (mounted) {
-                  setState(() => _error =
-                      'تعذر تهيئة كاميرا QR: $cameraError. تحقق من إذن الكاميرا وأعد المحاولة.');
-                }
-              }
-            });
-            return Dialog(
-            insetPadding: const EdgeInsets.all(18),
-            child: SizedBox(
-              height: 460,
-              child: Column(children: [
-                Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(children: [
-                    const Expanded(child: Text('امسح رمز QR الخاص بالمستلم', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17))),
-                    IconButton(onPressed: () => Navigator.pop(dialogContext), icon: const Icon(Icons.close)),
-                  ]),
-                ),
-                Expanded(child: ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: MobileScanner(
-                    controller: controller,
-                    errorBuilder: (context, error, child) => Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.no_photography_outlined, size: 42),
-                            const SizedBox(height: 12),
-                            Text(
-                              error.errorCode == MobileScannerErrorCode.permissionDenied
-                                  ? 'إذن الكاميرا غير متاح. اسمح للتطبيق باستخدام الكاميرا من إعدادات Android ثم أعد المحاولة.'
-                                  : 'تعذر تشغيل الكاميرا (${error.errorCode.name}). أغلق تطبيق الكاميرا وأي ماسح آخر، ثم أعد المحاولة. إذا استمر الخطأ، أغلق التطبيق وافتحه مجددًا.',
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 12),
-                            FilledButton.icon(
-                              onPressed: () async {
-                                try {
-                                  await controller.stop();
-                                  await Future<void>.delayed(const Duration(milliseconds: 350));
-                                  await controller.start();
-                                } catch (retryError) {
-                                  if (mounted) {
-                                    setState(() => _error = 'تعذرت إعادة تشغيل الكاميرا: $retryError. أغلق التطبيقات التي قد تستخدم الكاميرا ثم حاول مجددًا.');
-                                  }
-                                }
-                              },
-                              icon: const Icon(Icons.refresh_rounded),
-                              label: const Text('إعادة محاولة تشغيل الكاميرا'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    onDetect: (capture) {
-                      if (_scanHandled || capture.barcodes.isEmpty) return;
-                      final value = capture.barcodes.first.rawValue;
-                      if (value == null || !value.startsWith('SMPLAYER|')) return;
-                      final target = value.substring('SMPLAYER|'.length).trim();
-                      if (target.isEmpty) return;
-                      _scanHandled = true;
-                      _scanTargetName = target;
-                      Navigator.pop(dialogContext);
-                      if (mounted) {
-                        setState(() {
-                          _status = 'تم مسح رمز الجهاز $target. جارٍ إنشاء الاتصال المباشر...';
-                          _error = null;
-                        });
-                        final match = _discovered.entries.where((entry) => entry.value == target).firstOrNull;
-                        if (match != null) {
-                          _connect(match.key, match.value);
-                        } else {
-                          _status = 'تمت قراءة الرمز. انتظر ظهور الجهاز المستلم في البحث؛ سيُطلب الاتصال تلقائيًا.';
-                        }
-                      }
-                    },
-                  ),
-                )),
-                const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text('يجب أن يكون الهاتف المستلم في وضع الاستقبال وقريبًا منك. لا يلزم الإنترنت.', textAlign: TextAlign.center),
-                ),
-              ]),
-            ),
-          );
-          },
-        );
-      } finally {
-        await controller.dispose();
+      if (target == null || target.trim().isEmpty || !mounted) return;
+      _scanTargetName = target.trim();
+      setState(() {
+        _status = 'تم مسح رمز الجهاز $_scanTargetName. جارٍ إنشاء الاتصال المباشر...';
+        _error = null;
+      });
+      final match = _discovered.entries
+          .where((entry) => entry.value == _scanTargetName)
+          .firstOrNull;
+      if (match != null) {
+        await _connect(match.key, match.value);
+      } else {
+        setState(() => _status =
+            'تمت قراءة الرمز. انتظر ظهور الجهاز المستلم في البحث؛ سيُطلب الاتصال تلقائيًا.');
       }
     } catch (e) {
       if (mounted) setState(() => _error = 'تعذر فتح ماسح QR: $e');
@@ -612,16 +520,12 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           final payloadId = await _nearby.sendFilePayload(endpointId, file.path);
           _progressNames[payloadId] = file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last;
           final digest = (await sha256.bind(file.openRead()).first).toString();
-          final metadataPayloadId = await _nearby.sendBytesPayload(
+          _nearby.sendBytesPayload(
             endpointId,
             Uint8List.fromList(utf8.encode('SMFILE1|$payloadId|${Uri.encodeComponent(file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last)}|$digest')),
           );
-          // Protocol metadata is not a user file; hide it from progress.
-          _metadataPayloads.add(metadataPayloadId);
-          _progressBytes.remove(metadataPayloadId);
-          _progressTotals.remove(metadataPayloadId);
-          _progressNames.remove(metadataPayloadId);
-          _progressStartedAt.remove(metadataPayloadId);
+          // The receiver identifies this BYTES payload as protocol metadata.
+          // sendBytesPayload returns void; it has no payload ID to track here.
         }
         if (mounted) setState(() => _queue.remove(file));
       }
@@ -809,6 +713,137 @@ String _formatBytes(int bytes) {
   if (bytes >= 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
   return '$bytes B';
+}
+
+/// Full-screen QR scanner. MobileScanner owns its automatic lifecycle on
+/// this route; the controller is restarted only after an explicit user retry.
+class _QrScannerPage extends StatefulWidget {
+  const _QrScannerPage();
+
+  @override
+  State<_QrScannerPage> createState() => _QrScannerPageState();
+}
+
+class _QrScannerPageState extends State<_QrScannerPage> {
+  late final MobileScannerController _controller;
+  bool _retrying = false;
+  String? _cameraError;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = MobileScannerController(
+      autoStart: true,
+      facing: CameraFacing.back,
+      detectionSpeed: DetectionSpeed.noDuplicates,
+      formats: const [BarcodeFormat.qrCode],
+    );
+  }
+
+  Future<void> _retryCamera() async {
+    if (_retrying) return;
+    setState(() { _retrying = true; _cameraError = null; });
+    try {
+      await _controller.stop();
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      if (!mounted) return;
+      await _controller.start();
+    } catch (error) {
+      if (mounted) {
+        setState(() => _cameraError =
+            'تعذر إعادة تهيئة الكاميرا: $error. تحقق من إذن الكاميرا ثم حاول مرة أخرى.');
+      }
+    } finally {
+      if (mounted) setState(() => _retrying = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('مسح رمز QR'),
+            leading: IconButton(
+              onPressed: () => Navigator.of(context).pop(),
+              icon: const Icon(Icons.close),
+            ),
+          ),
+          body: SafeArea(
+            child: Column(
+              children: [
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'وجّه الكاميرا نحو رمز SM Player على الهاتف المستقبِل.',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: MobileScanner(
+                        controller: _controller,
+                        errorBuilder: (context, error, child) => Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.no_photography_outlined, size: 52),
+                                const SizedBox(height: 16),
+                                Text(
+                                  error.errorCode == MobileScannerErrorCode.permissionDenied
+                                      ? 'إذن الكاميرا غير متاح. افتح إعدادات التطبيق واسمح باستخدام الكاميرا.'
+                                      : 'تعذر تشغيل الكاميرا (${error.errorCode.name}). قد يكون السبب تعارضًا في تهيئة الكاميرا أو مشكلة من Android CameraX.',
+                                  textAlign: TextAlign.center,
+                                ),
+                                if (_cameraError != null) ...[
+                                  const SizedBox(height: 8),
+                                  Text(_cameraError!, textAlign: TextAlign.center),
+                                ],
+                                const SizedBox(height: 16),
+                                FilledButton.icon(
+                                  onPressed: _retrying ? null : _retryCamera,
+                                  icon: _retrying
+                                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                      : const Icon(Icons.refresh_rounded),
+                                  label: Text(_retrying ? 'جارٍ إعادة تشغيل الكاميرا...' : 'إعادة محاولة تشغيل الكاميرا'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        onDetect: (capture) {
+                          if (capture.barcodes.isEmpty) return;
+                          final value = capture.barcodes.first.rawValue;
+                          if (value == null || !value.startsWith('SMPLAYER|')) return;
+                          final target = value.substring('SMPLAYER|'.length).trim();
+                          if (target.isNotEmpty && mounted) {
+                            Navigator.of(context).pop(target);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('يتم الاتصال مباشرة بين الهاتفين ولا يلزم الإنترنت.'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
 }
 
 class TransferProgressScreen extends StatelessWidget {
