@@ -761,10 +761,10 @@ class _QrScannerPageState extends State<_QrScannerPage> with WidgetsBindingObser
     }
   }
 
-  Future<void> _disposeCamera() async {
+  Future<void> _disposeCamera({bool updateUi = true}) async {
     final old = _cameraController;
     _cameraController = null;
-    if (mounted) setState(() {});
+    if (updateUi && mounted) setState(() {});
     if (old != null) {
       try {
         if (old.value.isStreamingImages) await old.stopImageStream();
@@ -876,7 +876,7 @@ class _QrScannerPageState extends State<_QrScannerPage> with WidgetsBindingObser
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    unawaited(_disposeCamera());
+    unawaited(_disposeCamera(updateUi: false));
     unawaited(_barcodeScanner.close());
     super.dispose();
   }
