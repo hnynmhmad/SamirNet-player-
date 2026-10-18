@@ -24,6 +24,7 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
   AssetPathEntity? _openedAlbum;
   List<AssetEntity> _albumVideos = [];
   bool _loading = true;
+  bool _loadingMore = false;
   String? _error;
 
   @override
@@ -35,11 +36,28 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
     _loadMedia();
   }
 
+  Future<List<AssetEntity>> _readAllInBatches(
+    AssetPathEntity album, {
+    void Function(List<AssetEntity> batch, bool hasMore)? onBatch,
+  }) async {
+    final total = await album.assetCountAsync;
+    final all = <AssetEntity>[];
+    const batchSize = 200;
+    for (var start = 0; start < total; start += batchSize) {
+      final end = start + batchSize < total ? start + batchSize : total;
+      final batch = await album.getAssetListRange(start: start, end: end);
+      if (batch.isEmpty) break;
+      all.addAll(batch);
+      onBatch?.call(batch, start + batch.length < total);
+    }
+    return all;
+  }
+
   Future<void> _loadMedia() async {
-    setState(() { _loading = true; _error = null; });
+    if (mounted) setState(() { _loading = true; _loadingMore = false; _error = null; });
     try {
       final permission = await PhotoManager.requestPermissionExtend();
-      if (!permission.isAuth) {
+      if (!permission.isAuth && !permission.hasAccess) {
         _error = 'اسمح للتطبيق بالوصول إلى الفيديوهات والموسيقى من إعدادات الأذونات.';
         return;
       }
@@ -54,30 +72,73 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
         onlyAll: false,
       );
       _videoAlbums = videoAlbums;
+      _videos = [];
+      _audio = [];
+      if (mounted) setState(() { _loading = false; _loadingMore = true; });
+
       if (videoAlbums.isNotEmpty) {
-        _videos = await videoAlbums.first.getAssetListPaged(page: 0, size: 1000);
+        var firstBatch = true;
+        await _readAllInBatches(videoAlbums.first, onBatch: (batch, hasMore) {
+          if (!mounted) return;
+          setState(() {
+            if (firstBatch) {
+              _videos = List<AssetEntity>.from(batch);
+              firstBatch = false;
+            } else {
+              _videos.addAll(batch);
+            }
+            _loading = false;
+            _loadingMore = hasMore || audioAlbums.isNotEmpty;
+          });
+        });
+        _videos.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
       }
       if (audioAlbums.isNotEmpty) {
-        _audio = await audioAlbums.first.getAssetListPaged(page: 0, size: 1000);
+        var firstBatch = true;
+        await _readAllInBatches(audioAlbums.first, onBatch: (batch, hasMore) {
+          if (!mounted) return;
+          setState(() {
+            if (firstBatch) {
+              _audio = List<AssetEntity>.from(batch);
+              firstBatch = false;
+            } else {
+              _audio.addAll(batch);
+            }
+            _loading = false;
+            _loadingMore = hasMore;
+          });
+        });
+        _audio.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
       }
-      _videos.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
-      _audio.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
     } catch (e) {
       _error = 'تعذر تحميل الوسائط: $e';
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() { _loading = false; _loadingMore = false; });
     }
   }
 
   Future<void> _openAlbum(AssetPathEntity album) async {
-    setState(() { _loading = true; _error = null; _openedAlbum = album; });
+    setState(() { _loading = true; _loadingMore = false; _error = null; _openedAlbum = album; _albumVideos = []; });
     try {
-      _albumVideos = await album.getAssetListPaged(page: 0, size: 1000);
+      var firstBatch = true;
+      await _readAllInBatches(album, onBatch: (batch, hasMore) {
+        if (!mounted) return;
+        setState(() {
+          if (firstBatch) {
+            _albumVideos = List<AssetEntity>.from(batch);
+            firstBatch = false;
+          } else {
+            _albumVideos.addAll(batch);
+          }
+          _loading = false;
+          _loadingMore = hasMore;
+        });
+      });
       _albumVideos.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
     } catch (e) {
       _error = 'تعذر فتح المجلد: $e';
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() { _loading = false; _loadingMore = false; });
     }
   }
 
@@ -155,6 +216,7 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
           ),
           if (_error != null)
             Padding(padding: const EdgeInsets.all(12), child: Text(_error!, style: const TextStyle(color: _pickerRed))),
+          if (_loadingMore) const LinearProgressIndicator(color: _pickerRed),
           Expanded(child: _loading
             ? const Center(child: CircularProgressIndicator(color: _pickerRed))
             : TabBarView(controller: _tabs, children: [
@@ -218,9 +280,19 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
             trailing: const Icon(Icons.chevron_left_rounded),
             onTap: () => _openAlbum(album),
             onLongPress: () async {
-              final assets = await album.getAssetListPaged(page: 0, size: 1000);
-              if (!mounted) return;
-              setState(() { for (final asset in assets) { _selected[asset.id] = asset; } });
+              setState(() { _loadingMore = true; _error = null; });
+              try {
+                final assets = await _readAllInBatches(album);
+                if (!mounted) return;
+                setState(() {
+                  for (final asset in assets) { _selected[asset.id] = asset; }
+                  _error = 'تم تحديد ${assets.length} فيديو من المجلد ${album.name}.';
+                });
+              } catch (e) {
+                if (mounted) setState(() => _error = 'تعذر تحديد ملفات المجلد: $e');
+              } finally {
+                if (mounted) setState(() => _loadingMore = false);
+              }
             },
           ),
         );
