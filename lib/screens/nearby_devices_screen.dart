@@ -40,6 +40,9 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   // Metadata is sent as a tiny BYTES payload beside each actual file. It is
   // protocol data, not a user file, so never show it in file progress.
   final Set<int> _metadataPayloads = {};
+  // sendBytesPayload has no returned payload ID, so identify our tiny protocol
+  // metadata updates by their exact encoded byte lengths on the sending device.
+  final Set<int> _metadataPayloadSizes = {};
   final Set<int> _finalizingPayloads = {};
   final Map<int, int> _progressBytes = {};
   final Map<int, int> _progressTotals = {};
@@ -277,7 +280,8 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   }
 
   void _onPayloadTransferUpdate(String endpointId, PayloadTransferUpdate update) {
-    if (!mounted || _metadataPayloads.contains(update.id)) return;
+    if (!mounted || _metadataPayloads.contains(update.id) ||
+        (update.totalBytes < 1024 && _metadataPayloadSizes.contains(update.totalBytes))) return;
     if (update.status == PayloadStatus.IN_PROGRESS) {
       setState(() {
         _progressBytes[update.id] = update.bytesTransferred;
@@ -520,12 +524,13 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           final payloadId = await _nearby.sendFilePayload(endpointId, file.path);
           _progressNames[payloadId] = file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last;
           final digest = (await sha256.bind(file.openRead()).first).toString();
-          _nearby.sendBytesPayload(
-            endpointId,
-            Uint8List.fromList(utf8.encode('SMFILE1|$payloadId|${Uri.encodeComponent(file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last)}|$digest')),
-          );
-          // The receiver identifies this BYTES payload as protocol metadata.
-          // sendBytesPayload returns void; it has no payload ID to track here.
+          final metadataBytes = Uint8List.fromList(utf8.encode(
+            'SMFILE1|$payloadId|${Uri.encodeComponent(file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last)}|$digest',
+          ));
+          _metadataPayloadSizes.add(metadataBytes.length);
+          _nearby.sendBytesPayload(endpointId, metadataBytes);
+          // sendBytesPayload returns void, so its progress callback is filtered
+          // by this exact small metadata-message length instead of a payload ID.
         }
         if (mounted) setState(() => _queue.remove(file));
       }
