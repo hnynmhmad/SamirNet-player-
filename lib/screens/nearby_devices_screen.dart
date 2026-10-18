@@ -783,41 +783,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                   label: Text(_sending ? 'جارٍ الإرسال...' : 'إرسال الملفات المحددة'),
                 ),
               ],
-              if (_progressTotals.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('إجمالي تقدم النقل', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 6),
-                      Text('${_formatBytes(_progressBytes.values.fold<int>(0, (sum, value) => sum + value))} من ${_formatBytes(_progressTotals.values.fold<int>(0, (sum, value) => sum + value))}'),
-                      const SizedBox(height: 6),
-                      LinearProgressIndicator(
-                        value: _progressTotals.values.fold<int>(0, (sum, value) => sum + value) <= 0
-                            ? null
-                            : (_progressBytes.values.fold<int>(0, (sum, value) => sum + value) /
-                                _progressTotals.values.fold<int>(0, (sum, value) => sum + value)).clamp(0.0, 1.0).toDouble(),
-                        color: _nearbyRed,
-                      ),
-                    ]),
-                  ),
-                ),
-                const Text('تقدم كل ملف', style: TextStyle(fontWeight: FontWeight.bold)),
-                ..._progressTotals.entries.map((entry) {
-                  final sent = _progressBytes[entry.key] ?? 0;
-                  final total = entry.value;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(_progressNames[entry.key] ?? 'ملف ${entry.key}', maxLines: 1, overflow: TextOverflow.ellipsis),
-                      Text('${_formatBytes(sent)} / ${_formatBytes(total)} · ${_progressStartedAt[entry.key] == null || DateTime.now().difference(_progressStartedAt[entry.key]!).inMilliseconds <= 0 ? 'حساب السرعة...' : _formatSpeed(sent / (DateTime.now().difference(_progressStartedAt[entry.key]!).inMilliseconds / 1000.0))}${total > sent && _progressStartedAt[entry.key] != null && sent > 0 ? ' · متبقٍ ${_formatDuration(Duration(seconds: ((total - sent) / (sent / (DateTime.now().difference(_progressStartedAt[entry.key]!).inMilliseconds / 1000.0))).round()))}' : ''}'),
-                      const SizedBox(height: 4),
-                      LinearProgressIndicator(value: total <= 0 ? null : (sent / total).clamp(0.0, 1.0).toDouble(), color: _nearbyRed),
-                    ]),
-                  );
-                }),
-              ],
               const SizedBox(height: 16),
               const Text('ملاحظة: قد يطلب Android تفعيل Bluetooth أو خدمات الموقع/الأجهزة القريبة. اتبع طلبات النظام، ولا يلزم تشغيل بيانات الهاتف أو الإنترنت.', style: TextStyle(color: Colors.grey)),
             ],
