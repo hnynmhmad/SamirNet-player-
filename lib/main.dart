@@ -652,14 +652,21 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
     // have a stale SharedPreferences platform implementation after an upgrade.
     try {
       final viewPrefs = await SharedPreferences.getInstance();
-      if (mounted) setState(() {
-        grid = viewPrefs.getBool('global_media_grid') ?? true;
-        sort = viewPrefs.getString('video_sort') ?? 'dateDesc';
-      });
+      if (mounted) {
+        setState(() {
+          grid = viewPrefs.getBool('global_media_grid') ?? true;
+          sort = viewPrefs.getString('video_sort') ?? 'dateDesc';
+        });
+      }
     } catch (prefsError, prefsStack) {
       debugPrint('Audio library will load without view preferences: $prefsError\\n$prefsStack');
     }
-    if (mounted) setState(() { loading = true; error = null; });
+    if (mounted) {
+      setState(() {
+        loading = true;
+        error = null;
+      });
+    }
     try {
       final permission = await PhotoManager.requestPermissionExtend(requestOption: const PermissionRequestOption(androidPermission: AndroidPermission(type: RequestType.audio, mediaLocation: false)));
       if (!permission.isAuth && !permission.hasAccess) {
