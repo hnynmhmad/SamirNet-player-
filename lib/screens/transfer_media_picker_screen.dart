@@ -74,11 +74,18 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
       _videoAlbums = videoAlbums;
       _videos = [];
       _audio = [];
+      // Do not assume the first album is the system-wide "All videos" album.
+      // Android providers can return a regular folder first, which silently
+      // limits the picker to that folder (often only a few hundred items).
+      final allVideosAlbum = videoAlbums.where((album) => album.isAll).firstOrNull ??
+          (videoAlbums.isNotEmpty ? videoAlbums.first : null);
+      final allAudioAlbum = audioAlbums.where((album) => album.isAll).firstOrNull ??
+          (audioAlbums.isNotEmpty ? audioAlbums.first : null);
       if (mounted) setState(() { _loading = false; _loadingMore = true; });
 
-      if (videoAlbums.isNotEmpty) {
+      if (allVideosAlbum != null) {
         var firstBatch = true;
-        await _readAllInBatches(videoAlbums.first, onBatch: (batch, hasMore) {
+        await _readAllInBatches(allVideosAlbum, onBatch: (batch, hasMore) {
           if (!mounted) return;
           setState(() {
             if (firstBatch) {
@@ -93,9 +100,9 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
         });
         _videos.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
       }
-      if (audioAlbums.isNotEmpty) {
+      if (allAudioAlbum != null) {
         var firstBatch = true;
-        await _readAllInBatches(audioAlbums.first, onBatch: (batch, hasMore) {
+        await _readAllInBatches(allAudioAlbum, onBatch: (batch, hasMore) {
           if (!mounted) return;
           setState(() {
             if (firstBatch) {
