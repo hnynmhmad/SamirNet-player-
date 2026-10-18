@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'package:file_picker/file_picker.dart';
@@ -49,24 +50,8 @@ class _SamirNetAppState extends State<SamirNetApp> {
   void initState() {
     super.initState();
     _load();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_requestNotificationPermission());
-    });
   }
 
-  Future<void> _requestNotificationPermission() async {
-    if (!Platform.isAndroid) return;
-    try {
-      // This native channel is installed by the Android build workflow and
-      // requests POST_NOTIFICATIONS from the actual Android Activity.
-      final granted = await const MethodChannel(
-        'com.samirnet.snplayer/notifications',
-      ).invokeMethod<bool>('requestPermission');
-      debugPrint('Notification permission granted: $granted');
-    } catch (error, stack) {
-      debugPrint('Notification permission request failed: $error\\n$stack');
-    }
-  }
   Future<void> _load() async {
     final p = await SharedPreferences.getInstance();
     final v = p.getString('theme') ?? 'light';
@@ -165,9 +150,51 @@ class _LibraryScreenState extends State<LibraryScreen> {
         await prefs.setBool('first_run_notifications_requested_v2', true);
       }
     }
-    // Do not open Android's All files access Settings automatically here.
-    // That external screen can interrupt the notification permission dialog.
-    // Storage/media permissions are requested by the relevant library screen.
+    // Request the essential media and QR-camera permissions sequentially on
+    // first launch. Do not mark a denied permission as completed: the next
+    // launch can ask again, and the user can still grant it from Settings.
+    if (Platform.isAndroid &&
+        prefs.getBool('first_run_media_permissions_requested_v1') != true) {
+      var mediaGranted = false;
+      try {
+        final videos = await PhotoManager.requestPermissionExtend(
+          requestOption: const PermissionRequestOption(
+            androidPermission: AndroidPermission(
+              type: RequestType.video,
+              mediaLocation: false,
+            ),
+          ),
+        );
+        final audio = await PhotoManager.requestPermissionExtend(
+          requestOption: const PermissionRequestOption(
+            androidPermission: AndroidPermission(
+              type: RequestType.audio,
+              mediaLocation: false,
+            ),
+          ),
+        );
+        mediaGranted = (videos.isAuth || videos.hasAccess) &&
+            (audio.isAuth || audio.hasAccess);
+      } catch (error) {
+        debugPrint('First-run media permission request failed: $error');
+      }
+      if (mediaGranted) {
+        await prefs.setBool('first_run_media_permissions_requested_v1', true);
+      }
+    }
+    if (Platform.isAndroid &&
+        prefs.getBool('first_run_camera_permission_requested_v1') != true) {
+      try {
+        final camera = await Permission.camera.request();
+        if (camera.isGranted) {
+          await prefs.setBool('first_run_camera_permission_requested_v1', true);
+        } else {
+          debugPrint('Camera permission not granted on first launch: $camera');
+        }
+      } catch (error) {
+        debugPrint('First-run camera permission request failed: $error');
+      }
+    }
   }
   @override
   void dispose() { search.dispose(); super.dispose(); }
