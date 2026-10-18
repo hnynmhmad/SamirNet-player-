@@ -134,28 +134,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
   }
   Future<void> _requestFirstRunPermissions() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool('first_run_notifications_requested_v2') != true) {
-      var permissionGranted = !Platform.isAndroid;
+    // Check actual Android permission state every launch. Preferences from an
+    // older build must not suppress a required permission prompt after the
+    // user revoked access in system settings.
+    if (Platform.isAndroid) {
       try {
-        permissionGranted = await const MethodChannel('com.samirnet.snplayer/notifications')
-                .invokeMethod<bool>('requestPermission') ??
-            false;
+        await const MethodChannel('com.samirnet.snplayer/notifications')
+            .invokeMethod<bool>('requestPermission');
       } catch (error) {
         debugPrint('Notification permission request failed: $error');
       }
-      // Do not mark the request complete when Android reports denial. This lets
-      // the app retry on a later launch instead of silently suppressing the prompt.
-      if (permissionGranted) {
-        await prefs.setBool('first_run_notifications_requested_v2', true);
-      }
-    }
-    // Request the essential media and QR-camera permissions sequentially on
-    // first launch. Do not mark a denied permission as completed: the next
-    // launch can ask again, and the user can still grant it from Settings.
-    if (Platform.isAndroid &&
-        prefs.getBool('first_run_media_permissions_requested_v1') != true) {
-      var mediaGranted = false;
+
       try {
         final videos = await PhotoManager.requestPermissionExtend(
           requestOption: const PermissionRequestOption(
@@ -165,6 +154,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
           ),
         );
+        if (!videos.isAuth && !videos.hasAccess) {
+          debugPrint('Video media permission not granted: $videos');
+        }
+
         final audio = await PhotoManager.requestPermissionExtend(
           requestOption: const PermissionRequestOption(
             androidPermission: AndroidPermission(
@@ -173,26 +166,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
           ),
         );
-        mediaGranted = (videos.isAuth || videos.hasAccess) &&
-            (audio.isAuth || audio.hasAccess);
-      } catch (error) {
-        debugPrint('First-run media permission request failed: $error');
-      }
-      if (mediaGranted) {
-        await prefs.setBool('first_run_media_permissions_requested_v1', true);
-      }
-    }
-    if (Platform.isAndroid &&
-        prefs.getBool('first_run_camera_permission_requested_v1') != true) {
-      try {
-        final camera = await Permission.camera.request();
-        if (camera.isGranted) {
-          await prefs.setBool('first_run_camera_permission_requested_v1', true);
-        } else {
-          debugPrint('Camera permission not granted on first launch: $camera');
+        if (!audio.isAuth && !audio.hasAccess) {
+          debugPrint('Audio media permission not granted: $audio');
         }
       } catch (error) {
-        debugPrint('First-run camera permission request failed: $error');
+        debugPrint('Media permission request failed: $error');
+      }
+
+      try {
+        var camera = await Permission.camera.status;
+        if (!camera.isGranted) camera = await Permission.camera.request();
+        if (!camera.isGranted) {
+          debugPrint('Camera permission not granted: $camera');
+        }
+      } catch (error) {
+        debugPrint('Camera permission request failed: $error');
       }
     }
   }
