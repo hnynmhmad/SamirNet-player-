@@ -401,6 +401,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       if (!mounted) return;
 
       final controller = MobileScannerController(
+        autoStart: false,
         facing: CameraFacing.back,
         detectionSpeed: DetectionSpeed.noDuplicates,
         formats: const [BarcodeFormat.qrCode],
@@ -409,9 +410,19 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         await showDialog<void>(
           context: context,
           builder: (dialogContext) {
-            // Let MobileScanner own camera lifecycle. Manually starting the
-            // controller during route animation can cause CameraX genericError
-            // on some Android devices.
+            // Start the camera only after the dialog has mounted, avoiding
+            // a CameraX start racing with the route transition.
+            WidgetsBinding.instance.addPostFrameCallback((_) async {
+              if (!dialogContext.mounted) return;
+              try {
+                await controller.start();
+              } catch (cameraError) {
+                if (mounted) {
+                  setState(() => _error =
+                      'تعذر تهيئة كاميرا QR: $cameraError. تحقق من إذن الكاميرا وأعد المحاولة.');
+                }
+              }
+            });
             return Dialog(
             insetPadding: const EdgeInsets.all(18),
             child: SizedBox(
@@ -583,7 +594,8 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     _progressNames.clear();
     _progressStartedAt.clear();
     _progressRevision.value++;
-    unawaited(Navigator.of(context).push<void>(MaterialPageRoute(
+    unawaited(Navigator.of(context).push<void>(MaterialPageRoute<void>(
+      fullscreenDialog: true,
       builder: (_) => TransferProgressScreen(
         progressRevision: _progressRevision,
         progressBytes: _progressBytes,
@@ -600,10 +612,16 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           final payloadId = await _nearby.sendFilePayload(endpointId, file.path);
           _progressNames[payloadId] = file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last;
           final digest = (await sha256.bind(file.openRead()).first).toString();
-          await _nearby.sendBytesPayload(
+          final metadataPayloadId = await _nearby.sendBytesPayload(
             endpointId,
             Uint8List.fromList(utf8.encode('SMFILE1|$payloadId|${Uri.encodeComponent(file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last)}|$digest')),
           );
+          // Protocol metadata is not a user file; hide it from progress.
+          _metadataPayloads.add(metadataPayloadId);
+          _progressBytes.remove(metadataPayloadId);
+          _progressTotals.remove(metadataPayloadId);
+          _progressNames.remove(metadataPayloadId);
+          _progressStartedAt.remove(metadataPayloadId);
         }
         if (mounted) setState(() => _queue.remove(file));
       }
