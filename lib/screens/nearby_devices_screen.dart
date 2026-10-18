@@ -752,7 +752,6 @@ class _QrScannerPageState extends State<_QrScannerPage> {
       _starting = true;
       _cameraError = null;
     });
-    MobileScannerController? nextController;
     try {
       var cameraPermission = await Permission.camera.status;
       if (!cameraPermission.isGranted) {
@@ -785,7 +784,7 @@ class _QrScannerPageState extends State<_QrScannerPage> {
       }
 
       // Recreate CameraX instead of calling start() on a failed controller.
-      nextController = MobileScannerController(
+      final nextController = MobileScannerController(
         autoStart: false,
         facing: CameraFacing.back,
         detectionSpeed: DetectionSpeed.noDuplicates,
