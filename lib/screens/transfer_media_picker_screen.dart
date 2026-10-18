@@ -77,10 +77,14 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
       // Do not assume the first album is the system-wide "All videos" album.
       // Android providers can return a regular folder first, which silently
       // limits the picker to that folder (often only a few hundred items).
-      final allVideosAlbum = videoAlbums.where((album) => album.isAll).firstOrNull ??
-          (videoAlbums.isNotEmpty ? videoAlbums.first : null);
-      final allAudioAlbum = audioAlbums.where((album) => album.isAll).firstOrNull ??
-          (audioAlbums.isNotEmpty ? audioAlbums.first : null);
+      final allVideoAlbums = videoAlbums.where((album) => album.isAll).toList();
+      final allAudioAlbums = audioAlbums.where((album) => album.isAll).toList();
+      final allVideosAlbum = allVideoAlbums.isNotEmpty
+          ? allVideoAlbums.first
+          : (videoAlbums.isNotEmpty ? videoAlbums.first : null);
+      final allAudioAlbum = allAudioAlbums.isNotEmpty
+          ? allAudioAlbums.first
+          : (audioAlbums.isNotEmpty ? audioAlbums.first : null);
       if (mounted) setState(() { _loading = false; _loadingMore = true; });
 
       if (allVideosAlbum != null) {
