@@ -58,7 +58,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   String? _status;
   String _localName = 'SM Player';
   String? _scanTargetName;
-  bool _scanHandled = false;
 
   @override
   void initState() {
@@ -387,7 +386,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   }
 
   Future<void> _scanQr() async {
-    _scanHandled = false;
     try {
       final cameraPermission = await Permission.camera.request();
       if (!cameraPermission.isGranted) {
