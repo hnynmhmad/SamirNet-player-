@@ -53,15 +53,35 @@ class _SamirNetAppState extends State<SamirNetApp> {
   }
 
   Future<void> _load() async {
-    final p = await SharedPreferences.getInstance();
-    final v = p.getString('theme') ?? 'light';
-    if (!mounted) return;
-    setState(() => mode = v == 'dark' ? ThemeMode.dark : ThemeMode.light);
+    try {
+      final p = await SharedPreferences.getInstance();
+      final saved = p.getString('theme') ?? 'light';
+      final restoredMode = switch (saved) {
+        'dark' => ThemeMode.dark,
+        'system' => ThemeMode.system,
+        _ => ThemeMode.light,
+      };
+      if (!mounted) return;
+      setState(() => mode = restoredMode);
+    } catch (error, stack) {
+      debugPrint('Unable to restore saved theme: $error\\n$stack');
+    }
   }
+
   Future<void> _setMode(ThemeMode value) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString('theme', value == ThemeMode.dark ? 'dark' : value == ThemeMode.light ? 'light' : 'system');
+    // Apply immediately so the visible screen changes before disk persistence.
     if (mounted) setState(() => mode = value);
+    try {
+      final p = await SharedPreferences.getInstance();
+      final saved = switch (value) {
+        ThemeMode.dark => 'dark',
+        ThemeMode.system => 'system',
+        ThemeMode.light => 'light',
+      };
+      await p.setString('theme', saved);
+    } catch (error, stack) {
+      debugPrint('Unable to save selected theme: $error\\n$stack');
+    }
   }
   @override
   Widget build(BuildContext context) => MaterialApp(
