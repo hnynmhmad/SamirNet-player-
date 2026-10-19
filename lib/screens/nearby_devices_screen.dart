@@ -46,6 +46,11 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final Set<int> _metadataPayloadSizes = {};
   final Set<int> _outgoingFilePayloads = {};
   final Set<int> _finalizingPayloads = {};
+  // A connection is approved once by the user; files from that approved peer
+  // are saved without asking the same question for every item in a batch.
+  final Set<String> _trustedEndpoints = {};
+  final Map<int, String> _payloadEndpoints = {};
+  final Map<int, Completer<void>> _payloadCompletions = {};
   final Map<int, int> _progressBytes = {};
   final Map<int, int> _progressTotals = {};
   final Map<int, String> _progressNames = {};
@@ -137,7 +142,9 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
             setState(() {
               _discovered[id] = name;
               _status = 'تم العثور على جهاز قريب.';
-              if (_scanTargetName != null && name == _scanTargetName && !_connected.containsKey(id)) {
+              if (_scanTargetName != null &&
+                  name.trim().toLowerCase() == _scanTargetName!.trim().toLowerCase() &&
+                  !_connected.containsKey(id)) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (mounted) _connect(id, name);
                 });
@@ -192,6 +199,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                 if (mounted) {
                   setState(() {
                     _connected[id] = info;
+                    _trustedEndpoints.add(id);
                     _status = 'اتصلت بـ ${info.endpointName}. يمكنك الإرسال والاستقبال.';
                     _error = null;
                   });
@@ -221,6 +229,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     if (!mounted) return;
     setState(() {
       _connected.remove(id);
+      _trustedEndpoints.remove(id);
       _status = 'انقطع اتصال أحد الأجهزة.';
     });
   }
@@ -257,6 +266,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         if (parts.length >= 3) {
           final id = int.tryParse(parts[1]);
           if (id != null) {
+            _payloadEndpoints[id] = endpointId;
             _receivedNames[id] = _safeFileName(Uri.decodeComponent(parts[2]));
             if (parts.length >= 4 &&
                 parts[3].length == 64 &&
@@ -274,6 +284,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         setState(() => _status = 'وصلت رسالة من الجهاز الآخر.');
       }
     } else if (payload.type == PayloadType.FILE && payload.uri != null) {
+      _payloadEndpoints[payload.id] = endpointId;
       _receivedUris[payload.id] = payload.uri!;
       _tryFinalizeReceivedFile(payload.id);
     }
@@ -302,10 +313,16 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       });
       _progressRevision.value++;
     } else if (update.status == PayloadStatus.FAILURE) {
+      final completion = _payloadCompletions.remove(update.id);
+      if (completion != null && !completion.isCompleted) {
+        completion.completeError(StateError('فشل نقل الملف ${_progressNames[update.id] ?? ''}'));
+      }
       setState(() => _error = 'فشل نقل أحد الملفات. افحص الاتصال ثم أعد المحاولة.');
       _progressRevision.value++;
     } else if (update.status == PayloadStatus.SUCCESS) {
       _completedPayloads.add(update.id);
+      final completion = _payloadCompletions.remove(update.id);
+      if (completion != null && !completion.isCompleted) completion.complete();
       _tryFinalizeReceivedFile(update.id);
       setState(() {
         _progressBytes[update.id] = update.totalBytes;
@@ -321,40 +338,18 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     final uri = _receivedUris[payloadId];
     final name = _receivedNames[payloadId];
     final expectedDigest = _receivedDigests[payloadId];
-    if (uri == null || name == null || expectedDigest == null || !_completedPayloads.contains(payloadId)) return;
+    final endpointId = _payloadEndpoints[payloadId];
+    if (uri == null ||
+        name == null ||
+        expectedDigest == null ||
+        endpointId == null ||
+        !_completedPayloads.contains(payloadId) ||
+        !_trustedEndpoints.contains(endpointId)) {
+      return;
+    }
     if (!_finalizingPayloads.add(payloadId)) return;
     try {
-      if (!mounted) return;
-      final accepted = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('استلام ملف جديد؟'),
-          content: Text('يريد الجهاز المتصل إرسال الملف التالي:\n\n$name\n\nلن يُحفظ الملف إلا بعد موافقتك والتحقق من سلامته.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('رفض الملف'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('قبول وحفظ'),
-            ),
-          ],
-        ),
-      );
-      _receivedUris.remove(payloadId);
-      _receivedNames.remove(payloadId);
-      _receivedDigests.remove(payloadId);
-      _completedPayloads.remove(payloadId);
-      if (accepted != true) {
-        if (mounted) setState(() => _status = 'تم رفض الملف الوارد: $name');
-        return;
-      }
-      var inbox = Directory('/storage/emulated/0/Download/SM Player Received');
-      if (!await inbox.parent.exists()) {
-        inbox = Directory('/sdcard/Download/SM Player Received');
-      }
+      final inbox = Directory('/storage/emulated/0/Download/SM Player Received');
       await inbox.create(recursive: true);
       final destination = await _uniqueFile(inbox, name);
       final saved = await _nearby.copyFileAndDeleteOriginal(uri, destination.path);
@@ -364,7 +359,16 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         await destination.delete();
         throw Exception('فشل التحقق من سلامة الملف بعد النقل؛ حُذف الملف غير المطابق.');
       }
-      if (mounted) setState(() => _status = 'تم استلام الملف والتحقق من سلامته: ${destination.path}');
+      if (mounted) {
+        setState(() {
+          _status = 'تم استلام الملف والتحقق من سلامته: ${destination.path}';
+          _receivedUris.remove(payloadId);
+          _receivedNames.remove(payloadId);
+          _receivedDigests.remove(payloadId);
+          _payloadEndpoints.remove(payloadId);
+          _completedPayloads.remove(payloadId);
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = 'وصل الملف لكن تعذر حفظه: $e');
     } finally {
@@ -417,8 +421,9 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         _status = 'تم مسح رمز الجهاز $_scanTargetName. جارٍ إنشاء الاتصال المباشر...';
         _error = null;
       });
+      final normalizedTarget = _scanTargetName!.trim().toLowerCase();
       final match = _discovered.entries
-          .where((entry) => entry.value == _scanTargetName)
+          .where((entry) => entry.value.trim().toLowerCase() == normalizedTarget)
           .firstOrNull;
       if (match != null) {
         await _connect(match.key, match.value);
@@ -510,6 +515,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     _progressTotals.clear();
     _progressNames.clear();
     _progressStartedAt.clear();
+    _completedPayloads.clear();
     _progressRevision.value++;
     unawaited(Navigator.of(context).push<void>(MaterialPageRoute<void>(
       fullscreenDialog: true,
@@ -523,27 +529,49 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     )));
     final pending = List<File>.from(_queue);
     try {
+      // Serialize large payloads; queuing many at once can contend for the radio.
       for (final file in pending) {
-        if (!await file.exists()) continue;
+        if (!await file.exists()) {
+          if (mounted) setState(() => _error = 'تُخطي ملفًا لم يعد موجودًا: ${file.path}');
+          continue;
+        }
+        final fileName = file.uri.pathSegments.isEmpty
+            ? file.path.split(Platform.pathSeparator).last
+            : file.uri.pathSegments.last;
+        // Hash before transfer so file I/O does not compete with the radio.
+        final digest = (await sha256.bind(file.openRead()).first).toString();
         for (final endpointId in _connected.keys.toList()) {
           final payloadId = await _nearby.sendFilePayload(endpointId, file.path);
           _outgoingFilePayloads.add(payloadId);
-          _progressNames[payloadId] = file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last;
-          final digest = (await sha256.bind(file.openRead()).first).toString();
+          _progressNames[payloadId] = fileName;
+          _progressTotals[payloadId] = await file.length();
+          _progressBytes[payloadId] = 0;
+          final completion = Completer<void>();
+          _payloadCompletions[payloadId] = completion;
           final metadataBytes = Uint8List.fromList(utf8.encode(
-            'SMFILE1|$payloadId|${Uri.encodeComponent(file.uri.pathSegments.isEmpty ? file.path.split(Platform.pathSeparator).last : file.uri.pathSegments.last)}|$digest',
+            'SMFILE1|$payloadId|${Uri.encodeComponent(fileName)}|$digest',
           ));
           _metadataPayloadSizes.add(metadataBytes.length);
           _nearby.sendBytesPayload(endpointId, metadataBytes);
-          // sendBytesPayload returns void, so its progress callback is filtered
-          // by this exact small metadata-message length instead of a payload ID.
+          _progressRevision.value++;
+          if (!_completedPayloads.contains(payloadId)) {
+            await completion.future.timeout(
+              const Duration(minutes: 60),
+              onTimeout: () => throw TimeoutException('انتهت مهلة نقل الملف: $fileName'),
+            );
+          }
+          _payloadCompletions.remove(payloadId);
         }
         if (mounted) setState(() => _queue.remove(file));
       }
-      if (mounted) setState(() => _status = 'تمت جدولة جميع الملفات للإرسال.');
+      if (mounted) setState(() => _status = 'اكتمل إرسال الملفات المحددة.');
     } catch (e) {
-      if (mounted) setState(() => _error = 'تعذر إرسال الملفات: $e');
+      if (mounted) setState(() => _error = 'توقف الإرسال: $e');
     } finally {
+      for (final completer in _payloadCompletions.values) {
+        if (!completer.isCompleted) completer.completeError(StateError('انتهت جلسة الإرسال'));
+      }
+      _payloadCompletions.clear();
       if (mounted) setState(() => _sending = false);
     }
   }
@@ -670,6 +698,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                 OutlinedButton.icon(onPressed: _disconnect, icon: const Icon(Icons.link_off_rounded), label: const Text('قطع الاتصال')),
               ],
               const Divider(height: 28),
+              if (!widget.receiveMode) ...[
               const Text('إرسال ملفات', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
               Wrap(
@@ -697,6 +726,22 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                   icon: const Icon(Icons.send_rounded),
                   label: Text(_sending ? 'جارٍ الإرسال...' : 'إرسال الملفات المحددة'),
                 ),
+              ],
+              ],
+              if (widget.receiveMode && _progressNames.isNotEmpty) ...[
+                const Text('الملفات الواردة', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                ..._progressNames.entries.map((entry) {
+                  final total = _progressTotals[entry.key] ?? 0;
+                  final received = _progressBytes[entry.key] ?? 0;
+                  final progress = total > 0 ? (received / total).clamp(0.0, 1.0) : 0.0;
+                  return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(entry.value, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(value: progress, color: _nearbyRed),
+                    const SizedBox(height: 4),
+                    Text('${_formatBytes(received)} من ${_formatBytes(total)}'),
+                  ])));
+                }),
               ],
               const SizedBox(height: 16),
               const Text('ملاحظة: قد يطلب Android تفعيل Bluetooth أو خدمات الموقع/الأجهزة القريبة. اتبع طلبات النظام، ولا يلزم تشغيل بيانات الهاتف أو الإنترنت.', style: TextStyle(color: Colors.grey)),
