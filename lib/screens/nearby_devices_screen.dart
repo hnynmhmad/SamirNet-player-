@@ -12,6 +12,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:wifi_iot/wifi_iot.dart';
 import 'transfer_media_picker_screen.dart';
 
 const _nearbyServiceId = 'com.samirnet.snplayer.transfer';
@@ -81,6 +82,17 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     }
     final android = await DeviceInfoPlugin().androidInfo;
     final sdk = android.version.sdkInt;
+    // Nearby Connections is peer-to-peer and can use Wi-Fi for high-bandwidth
+    // transfers, but Android may fall back to Bluetooth when Wi-Fi is disabled.
+    // Do not silently start a slow transfer on that fallback path.
+    final wifiEnabled = await WiFiForIoTPlugin.isEnabled();
+    if (!wifiEnabled) {
+      _error = 'للنقل السريع المباشر، فعّل Wi-Fi على الهاتفين أولًا. سنفتح إعدادات Wi-Fi؛ لا تحتاج إلى الاتصال بالإنترنت أو امتلاك رصيد.';
+      try {
+        await WiFiForIoTPlugin.setEnabled(true, shouldOpenSettings: true);
+      } catch (_) {}
+      return false;
+    }
     final requiredPermissions = <Permission>[
       if (sdk >= 31) ...[
         Permission.bluetoothScan,
@@ -143,7 +155,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
               _discovered[id] = name;
               _status = 'تم العثور على جهاز قريب.';
               if (_scanTargetName != null &&
-                  name.trim().toLowerCase() == _scanTargetName!.trim().toLowerCase() &&
+                  _normalizeEndpointName(name) == _normalizeEndpointName(_scanTargetName!) &&
                   !_connected.containsKey(id)) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (mounted) _connect(id, name);
@@ -159,7 +171,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         if (!_discovering) {
           throw Exception('تعذر بدء البحث عن الأجهزة القريبة.');
         }
-        _status = 'جارٍ البحث عن أجهزة SM Player القريبة دون إنترنت...';
+        _status = 'جارٍ البحث عن أجهزة SM Player القريبة عبر اتصال مباشر دون إنترنت. تأكد من تفعيل Wi-Fi على الهاتفين للحصول على أفضل سرعة.';
       }
     } catch (e) {
       _error = 'تعذر بدء الاتصال: $e. تأكد من تفعيل Bluetooth وWi-Fi والأجهزة القريبة على الهاتفين، ولا يلزم الإنترنت.';
@@ -238,7 +250,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   Future<void> _connect(String id, String name) async {
     try {
       setState(() {
-        _status = 'جارٍ الاتصال بـ $name...';
+        _status = 'جارٍ إنشاء اتصال مباشر عالي السرعة مع $name...';
         _error = null;
       });
       await _nearby.requestConnection(
@@ -422,9 +434,9 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         _status = 'تم مسح رمز الجهاز $_scanTargetName. جارٍ إنشاء الاتصال المباشر...';
         _error = null;
       });
-      final normalizedTarget = _scanTargetName!.trim().toLowerCase();
+      final normalizedTarget = _normalizeEndpointName(_scanTargetName!);
       final match = _discovered.entries
-          .where((entry) => entry.value.trim().toLowerCase() == normalizedTarget)
+          .where((entry) => _normalizeEndpointName(entry.value) == normalizedTarget)
           .firstOrNull;
       if (match != null) {
         await _connect(match.key, match.value);
@@ -553,7 +565,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
             'SMFILE1|$payloadId|${Uri.encodeComponent(fileName)}|$digest',
           ));
           _metadataPayloadSizes.add(metadataBytes.length);
-          _nearby.sendBytesPayload(endpointId, metadataBytes);
+          await _nearby.sendBytesPayload(endpointId, metadataBytes);
           _progressRevision.value++;
           if (!_completedPayloads.contains(payloadId)) {
             await completion.future.timeout(
@@ -751,6 +763,11 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         ),
       );
 }
+
+String _normalizeEndpointName(String name) => name
+    .replaceAll(RegExp(r'\\s+'), ' ')
+    .trim()
+    .toLowerCase();
 
 String _formatSpeed(double bytesPerSecond) {
   if (!bytesPerSecond.isFinite || bytesPerSecond <= 0) return '0 B/s';
