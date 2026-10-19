@@ -222,6 +222,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       _status = 'نتيجة الاتصال: $status';
       if (status != Status.CONNECTED) {
         _connected.remove(id);
+        _trustedEndpoints.remove(id);
       }
     });
   }
@@ -734,7 +735,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                 ..._progressNames.entries.map((entry) {
                   final total = _progressTotals[entry.key] ?? 0;
                   final received = _progressBytes[entry.key] ?? 0;
-                  final progress = total > 0 ? (received / total).clamp(0.0, 1.0) : 0.0;
+                  final progress = total > 0 ? (received / total).clamp(0.0, 1.0).toDouble() : 0.0;
                   return Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(entry.value, maxLines: 2, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 8),
