@@ -60,6 +60,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final Map<int, DateTime> _progressStartedAt = {};
   final Map<int, File> _openableFiles = {};
   final Set<String> _connectingEndpoints = {};
+  final Set<String> _connectionInitiatedEndpoints = {};
   final ValueNotifier<int> _progressRevision = ValueNotifier<int>(0);
   bool _showTransferScreen = false;
   int _lastSpeedSampleBytes = 0;
@@ -190,6 +191,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   }
 
   void _onConnectionInitiated(String id, ConnectionInfo info) {
+    _connectionInitiatedEndpoints.add(id);
     if (!mounted) return;
     // Scanning the peer's QR is explicit consent to connect from this phone.
     // The receiving phone still confirms the request and authentication token.
@@ -210,6 +212,8 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(dialogContext);
+              _connectingEndpoints.remove(id);
+              _connectionInitiatedEndpoints.remove(id);
               await _nearby.rejectConnection(id);
             },
             child: const Text('رفض'),
@@ -234,6 +238,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         onPayloadTransferUpdate: _onPayloadTransferUpdate,
       );
       _connectingEndpoints.remove(id);
+      _connectionInitiatedEndpoints.remove(id);
       if (mounted) {
         setState(() {
           _connected[id] = info;
@@ -245,12 +250,14 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       }
     } catch (e) {
       _connectingEndpoints.remove(id);
+      _connectionInitiatedEndpoints.remove(id);
       if (mounted) setState(() => _error = 'تعذر قبول الاتصال: $e');
     }
   }
 
   void _onConnectionResult(String id, Status status) {
     _connectingEndpoints.remove(id);
+    _connectionInitiatedEndpoints.remove(id);
     if (!mounted) return;
     setState(() {
       _status = 'نتيجة الاتصال: $status';
@@ -263,6 +270,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
 
   void _onDisconnected(String id) {
     _connectingEndpoints.remove(id);
+    _connectionInitiatedEndpoints.remove(id);
     if (!mounted) return;
     setState(() {
       _connected.remove(id);
@@ -285,6 +293,12 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         onConnectionResult: _onConnectionResult,
         onDisconnected: _onDisconnected,
       );
+      unawaited(Future<void>.delayed(const Duration(seconds: 20), () {
+        if (!mounted || _connected.containsKey(id) || _connectionInitiatedEndpoints.contains(id)) return;
+        if (_connectingEndpoints.remove(id)) {
+          setState(() => _error = 'لم يصل رد من الجهاز الآخر خلال 20 ثانية. تأكد أن شاشة الاستقبال مفتوحة، ثم أعد مسح الرمز أو اضغط اتصال.');
+        }
+      }));
     } catch (e) {
       _connectingEndpoints.remove(id);
       if (mounted) setState(() => _error = 'تعذر الاتصال بالجهاز: $e');
