@@ -696,10 +696,10 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
               padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
               child: Row(children: [
                 Expanded(child: _TransferStat(
-                  icon: Icons.file_download_done_rounded,
-                  label: 'تم النقل',
-                  value: _formatBytes(transferred),
-                  subtitle: total > 0 ? 'من ${_formatBytes(total)}' : 'بانتظار الملفات',
+                  icon: Icons.folder_copy_outlined,
+                  label: 'الإجمالي',
+                  value: _formatBytes(total),
+                  subtitle: '${ids.length} ملف',
                 )),
                 Container(width: 1, height: 64, color: _nearbyRed.withOpacity(0.45)),
                 Expanded(child: _TransferStat(
@@ -710,10 +710,10 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                 )),
                 Container(width: 1, height: 64, color: _nearbyRed.withOpacity(0.45)),
                 Expanded(child: _TransferStat(
-                  icon: Icons.folder_copy_outlined,
-                  label: 'الإجمالي',
-                  value: _formatBytes(total),
-                  subtitle: '${ids.length} ملف',
+                  icon: Icons.file_download_done_rounded,
+                  label: 'تم النقل',
+                  value: _formatBytes(transferred),
+                  subtitle: total > 0 ? 'من ${_formatBytes(total)}' : 'بانتظار الملفات',
                 )),
               ]),
             ),
