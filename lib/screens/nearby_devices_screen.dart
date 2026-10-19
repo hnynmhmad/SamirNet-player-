@@ -13,6 +13,8 @@ import 'package:camera/camera.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:wifi_iot/wifi_iot.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:video_player/video_player.dart';
 import 'transfer_media_picker_screen.dart';
 
 const _nearbyServiceId = 'com.samirnet.snplayer.transfer';
@@ -56,7 +58,10 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final Map<int, int> _progressTotals = {};
   final Map<int, String> _progressNames = {};
   final Map<int, DateTime> _progressStartedAt = {};
+  final Map<int, File> _openableFiles = {};
   final ValueNotifier<int> _progressRevision = ValueNotifier<int>(0);
+  bool _showTransferScreen = false;
+  DateTime? _sessionStartedAt;
 
   bool _starting = false;
   bool _advertising = false;
@@ -281,6 +286,9 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           if (id != null) {
             _payloadEndpoints[id] = endpointId;
             _receivedNames[id] = _safeFileName(Uri.decodeComponent(parts[2]));
+            _progressNames[id] = _receivedNames[id]!;
+            _progressRevision.value++;
+            if (mounted) setState(() => _showTransferScreen = true);
             if (parts.length >= 4 &&
                 parts[3].length == 64 &&
                 parts[3].codeUnits.every((code) =>
@@ -297,6 +305,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         setState(() => _status = 'وصلت رسالة من الجهاز الآخر.');
       }
     } else if (payload.type == PayloadType.FILE && payload.uri != null) {
+      if (mounted) setState(() => _showTransferScreen = true);
       _payloadEndpoints[payload.id] = endpointId;
       _receivedUris[payload.id] = payload.uri!;
       _tryFinalizeReceivedFile(payload.id);
@@ -314,6 +323,8 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     }
     if (update.status == PayloadStatus.IN_PROGRESS) {
       setState(() {
+        _showTransferScreen = true;
+        _sessionStartedAt ??= DateTime.now();
         _progressBytes[update.id] = update.bytesTransferred;
         _progressTotals[update.id] = update.totalBytes;
         _progressStartedAt.putIfAbsent(update.id, DateTime.now);
@@ -374,6 +385,8 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       }
       if (mounted) {
         setState(() {
+          _openableFiles[payloadId] = destination;
+          _showTransferScreen = true;
           _status = 'تم استلام الملف والتحقق من سلامته: ${destination.path}';
           _receivedUris.remove(payloadId);
           _receivedNames.remove(payloadId);
@@ -520,8 +533,10 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   Future<void> _sendQueue() async {
     if (_queue.isEmpty || _connected.isEmpty || _sending) return;
     setState(() {
+      _showTransferScreen = true;
+      _sessionStartedAt ??= DateTime.now();
       _sending = true;
-      _status = 'جارٍ إرسال الملفات إلى الأجهزة المتصلة...';
+      _status = 'جارٍ نقل الملفات عبر الاتصال الحالي...';
       _error = null;
     });
     _progressBytes.clear();
@@ -530,16 +545,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     _progressStartedAt.clear();
     _completedPayloads.clear();
     _progressRevision.value++;
-    unawaited(Navigator.of(context).push<void>(MaterialPageRoute<void>(
-      fullscreenDialog: true,
-      builder: (_) => TransferProgressScreen(
-        progressRevision: _progressRevision,
-        progressBytes: _progressBytes,
-        progressTotals: _progressTotals,
-        progressNames: _progressNames,
-        progressStartedAt: _progressStartedAt,
-      ),
-    )));
     final pending = List<File>.from(_queue);
     try {
       // Serialize large payloads; queuing many at once can contend for the radio.
@@ -556,6 +561,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         for (final endpointId in _connected.keys.toList()) {
           final payloadId = await _nearby.sendFilePayload(endpointId, file.path);
           _outgoingFilePayloads.add(payloadId);
+          _openableFiles[payloadId] = file;
           _progressNames[payloadId] = fileName;
           _progressTotals[payloadId] = await file.length();
           _progressBytes[payloadId] = 0;
@@ -587,6 +593,222 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       _payloadCompletions.clear();
       if (mounted) setState(() => _sending = false);
     }
+  }
+
+  Future<void> _openCompletedFile(File file) async {
+    if (!await file.exists() || !mounted) {
+      if (mounted) setState(() => _error = 'الملف غير متاح للفتح.');
+      return;
+    }
+    final extension = file.path.split('.').last.toLowerCase();
+    if (const {'mp4', 'mkv', 'mov', 'webm', 'avi', '3gp', 'm4v'}.contains(extension)) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(builder: (_) => _ReceivedVideoPlayer(file: file)),
+      );
+      return;
+    }
+    try {
+      final result = await OpenFilex.open(file.path);
+      if (result.type != ResultType.done && mounted) {
+        setState(() => _error = 'تعذر فتح الملف: ${result.message}');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = 'تعذر فتح الملف: $e');
+    }
+  }
+
+  Future<void> _addMoreAndSend() async {
+    if (_connected.isEmpty) {
+      setState(() => _error = 'لا يوجد جهاز متصل. أعد الاتصال أولًا.');
+      return;
+    }
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('إضافة ملفات إلى جلسة النقل الحالية', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          ),
+          ListTile(leading: const Icon(Icons.video-library_outlined, color: _nearbyRed), title: const Text('الفيديوهات والموسيقى'), onTap: () => Navigator.pop(sheetContext, 'media')),
+          ListTile(leading: const Icon(Icons.insert_drive_file_outlined, color: _nearbyRed), title: const Text('ملفات أخرى'), onTap: () => Navigator.pop(sheetContext, 'files')),
+          ListTile(leading: const Icon(Icons.folder_open_rounded, color: _nearbyRed), title: const Text('مجلد كامل'), onTap: () => Navigator.pop(sheetContext, 'folder')),
+        ]),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    final before = _queue.length;
+    if (choice == 'media') {
+      await _pickMediaFiles();
+    } else if (choice == 'files') {
+      await _pickOtherFiles();
+    } else {
+      await _pickFolder();
+    }
+    if (!mounted) return;
+    if (_queue.length > before) {
+      await _sendQueue();
+    } else if (_queue.isEmpty && mounted) {
+      setState(() => _status = 'لم تتم إضافة ملفات جديدة.');
+    }
+  }
+
+  Widget _buildTransferScreen(BuildContext context) {
+    final ids = _progressTotals.keys.toSet().union(_progressNames.keys.toSet()).toList()
+      ..sort((a, b) => a.compareTo(b));
+    final transferred = ids.fold<int>(0, (sum, id) => sum + (_progressBytes[id] ?? 0));
+    final total = ids.fold<int>(0, (sum, id) => sum + (_progressTotals[id] ?? 0));
+    final activeIds = ids.where((id) {
+      final bytes = _progressBytes[id] ?? 0;
+      final bytesTotal = _progressTotals[id] ?? 0;
+      return bytesTotal > 0 && bytes < bytesTotal;
+    }).toList();
+    final speed = activeIds.fold<double>(0, (sum, id) {
+      final started = _progressStartedAt[id];
+      if (started == null) return sum;
+      final seconds = DateTime.now().difference(started).inMilliseconds / 1000.0;
+      return sum + (seconds > 0 ? (_progressBytes[id] ?? 0) / seconds : 0);
+    });
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final softRed = dark ? const Color(0xFF3B1C22) : const Color(0xFFFFEEEE);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('نقل الملفات'),
+        leading: IconButton(
+          tooltip: 'العودة إلى الاتصال',
+          onPressed: () => setState(() => _showTransferScreen = false),
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'إخفاء التفاصيل',
+            onPressed: () => setState(() => _showTransferScreen = false),
+            icon: const Icon(Icons.expand_more_rounded),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            child: Container(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surface,
+                border: Border.all(color: _nearbyRed, width: 1.4),
+                borderRadius: BorderRadius.circular(22),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+              child: Row(children: [
+                Expanded(child: _TransferStat(
+                  icon: Icons.file_download_done_rounded,
+                  label: 'تم النقل',
+                  value: _formatBytes(transferred),
+                  subtitle: total > 0 ? 'من ${_formatBytes(total)}' : 'بانتظار الملفات',
+                )),
+                Container(width: 1, height: 64, color: _nearbyRed.withValues(alpha: 0.45)),
+                Expanded(child: _TransferStat(
+                  icon: Icons.speed_rounded,
+                  label: 'سرعة النقل',
+                  value: _formatSpeed(speed),
+                  subtitle: activeIds.isEmpty ? 'لا يوجد نقل نشط' : 'السرعة الحالية التقريبية',
+                )),
+                Container(width: 1, height: 64, color: _nearbyRed.withValues(alpha: 0.45)),
+                Expanded(child: _TransferStat(
+                  icon: Icons.folder_copy_outlined,
+                  label: 'الإجمالي',
+                  value: _formatBytes(total),
+                  subtitle: '${ids.length} ملف',
+                )),
+              ]),
+            ),
+          ),
+          if (_error != null)
+            Padding(padding: const EdgeInsets.fromLTRB(12, 8, 12, 0), child: Text(_error!, style: TextStyle(color: theme.colorScheme.error))),
+          if (_status != null)
+            Padding(padding: const EdgeInsets.fromLTRB(12, 4, 12, 0), child: Text(_status!, style: theme.textTheme.bodySmall, textAlign: TextAlign.center)),
+          Expanded(
+            child: ids.isEmpty
+              ? Center(child: Text('بانتظار بدء نقل الملفات...', style: theme.textTheme.bodyMedium))
+              : ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: ids.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final id = ids[index];
+                    final name = _progressNames[id] ?? _receivedNames[id] ?? 'ملف $id';
+                    final fileBytes = _progressBytes[id] ?? 0;
+                    final fileTotal = _progressTotals[id] ?? 0;
+                    final ratio = fileTotal > 0 ? (fileBytes / fileTotal).clamp(0.0, 1.0).toDouble() : 0.0;
+                    final complete = _openableFiles[id] != null && _completedPayloads.contains(id);
+                    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+                    final icon = const {'mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg'}.contains(ext)
+                      ? Icons.music_note_rounded
+                      : const {'mp4', 'mkv', 'mov', 'webm', 'avi', '3gp', 'm4v'}.contains(ext)
+                        ? Icons.play_circle_fill_rounded
+                        : Icons.insert_drive_file_outlined;
+                    final started = _progressStartedAt[id];
+                    final elapsed = started == null ? 0.0 : DateTime.now().difference(started).inMilliseconds / 1000.0;
+                    final fileSpeed = elapsed > 0 ? fileBytes / elapsed : 0.0;
+                    return Card(
+                      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: dark ? 0.7 : 0.55),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                          Container(
+                            width: 64, height: 64,
+                            decoration: BoxDecoration(color: softRed, borderRadius: BorderRadius.circular(14)),
+                            child: Icon(icon, color: _nearbyRed, size: 34),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 4),
+                            Text('${_formatBytes(fileTotal)} · ${_formatSpeed(fileSpeed)}', style: theme.textTheme.bodySmall),
+                            const SizedBox(height: 8),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: LinearProgressIndicator(
+                                minHeight: 8,
+                                value: fileTotal > 0 ? ratio : null,
+                                color: _nearbyRed,
+                                backgroundColor: dark ? const Color(0xFF374151) : const Color(0xFFE2E8F0),
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Text('${_formatBytes(fileBytes)} / ${_formatBytes(fileTotal)} · ${(ratio * 100).round()}%', style: theme.textTheme.bodySmall),
+                            if (complete)
+                              Align(
+                                alignment: AlignmentDirectional.centerStart,
+                                child: TextButton.icon(
+                                  onPressed: () => _openCompletedFile(_openableFiles[id]!),
+                                  icon: const Icon(Icons.open_in_new_rounded),
+                                  label: const Text('فتح الملف'),
+                                ),
+                              ),
+                          ])),
+                        ]),
+                      ),
+                    );
+                  },
+                ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: _nearbyRed, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 15)),
+                onPressed: _sending ? null : _addMoreAndSend,
+                icon: const Icon(Icons.add_to_photos_rounded),
+                label: Text(_sending ? 'جارٍ نقل الملفات...' : 'إرسال المزيد'),
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
   }
 
   Future<void> _stopDiscoveryAndAdvertising() async {
@@ -625,7 +847,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   @override
   Widget build(BuildContext context) => Directionality(
         textDirection: TextDirection.rtl,
-        child: Scaffold(
+        child: _showTransferScreen ? _buildTransferScreen(context) : Scaffold(
           appBar: AppBar(
             title: Text(widget.receiveMode ? 'استلام من جهاز قريب' : 'إرسال إلى جهاز قريب'),
             actions: [
@@ -765,9 +987,96 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
 }
 
 String _normalizeEndpointName(String name) => name
-    .replaceAll(RegExp(r'\\s+'), ' ')
+    .replaceAll(RegExp(r'\s+'), ' ')
     .trim()
     .toLowerCase();
+
+class _TransferStat extends StatelessWidget {
+  const _TransferStat({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 4),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, color: _nearbyRed, size: 25),
+      const SizedBox(height: 5),
+      Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
+      const SizedBox(height: 3),
+      FittedBox(fit: BoxFit.scaleDown, child: Text(value, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17))),
+      const SizedBox(height: 2),
+      Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.bodySmall),
+    ]),
+  );
+}
+
+class _ReceivedVideoPlayer extends StatefulWidget {
+  const _ReceivedVideoPlayer({required this.file});
+  final File file;
+
+  @override
+  State<_ReceivedVideoPlayer> createState() => _ReceivedVideoPlayerState();
+}
+
+class _ReceivedVideoPlayerState extends State<_ReceivedVideoPlayer> {
+  late final VideoPlayerController _controller;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.file(widget.file)
+      ..initialize().then((_) {
+        if (mounted) setState(() {});
+        _controller.play();
+      }).catchError((Object error) {
+        if (mounted) setState(() => _error = 'تعذر تشغيل الفيديو: $error');
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: Text(widget.file.uri.pathSegments.last, maxLines: 1, overflow: TextOverflow.ellipsis)),
+    body: Center(
+      child: _error != null
+        ? Padding(padding: const EdgeInsets.all(20), child: Text(_error!, textAlign: TextAlign.center))
+        : !_controller.value.isInitialized
+          ? const CircularProgressIndicator(color: _nearbyRed)
+          : AspectRatio(
+              aspectRatio: _controller.value.aspectRatio,
+              child: Stack(alignment: Alignment.bottomCenter, children: [
+                VideoPlayer(_controller),
+                VideoProgressIndicator(_controller, allowScrubbing: true, padding: const EdgeInsets.all(12)),
+                Align(
+                  alignment: Alignment.center,
+                  child: IconButton.filled(
+                    iconSize: 36,
+                    onPressed: () => setState(() {
+                      _controller.value.isPlaying ? _controller.pause() : _controller.play();
+                    }),
+                    icon: Icon(_controller.value.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                  ),
+                ),
+              ]),
+            ),
+    ),
+  );
+}
 
 String _formatSpeed(double bytesPerSecond) {
   if (!bytesPerSecond.isFinite || bytesPerSecond <= 0) return '0 B/s';
