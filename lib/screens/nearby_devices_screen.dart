@@ -191,7 +191,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   }
 
   void _onConnectionInitiated(String id, ConnectionInfo info) {
-    _connectingEndpoints.remove(id);
     if (!mounted) return;
     // Scanning the peer's QR is explicit consent to connect from this phone.
     // The receiving phone still confirms the request and authentication token.
@@ -235,6 +234,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         onPayLoadRecieved: _onPayloadReceived,
         onPayloadTransferUpdate: _onPayloadTransferUpdate,
       );
+      _connectingEndpoints.remove(id);
       if (mounted) {
         setState(() {
           _connected[id] = info;
@@ -244,6 +244,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         });
       }
     } catch (e) {
+      _connectingEndpoints.remove(id);
       if (mounted) setState(() => _error = 'تعذر قبول الاتصال: $e');
     }
   }
@@ -698,7 +699,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       final bytesTotal = _progressTotals[id] ?? 0;
       return bytesTotal > 0 && bytes < bytesTotal;
     }).toList();
-    final speed = _currentTransferSpeedBytesPerSecond;
+    final speed = activeIds.isEmpty ? 0.0 : _currentTransferSpeedBytesPerSecond;
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
     final softRed = dark ? const Color(0xFF3B1C22) : const Color(0xFFFFEEEE);
