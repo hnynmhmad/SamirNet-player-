@@ -62,7 +62,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final Set<String> _connectingEndpoints = {};
   final ValueNotifier<int> _progressRevision = ValueNotifier<int>(0);
   bool _showTransferScreen = false;
-  DateTime? _sessionStartedAt;
   int _lastSpeedSampleBytes = 0;
   DateTime? _lastSpeedSampleAt;
   double _currentTransferSpeedBytesPerSecond = 0;
@@ -362,7 +361,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     if (update.status == PayloadStatus.IN_PROGRESS) {
       setState(() {
         _showTransferScreen = true;
-        _sessionStartedAt ??= DateTime.now();
         _progressBytes[update.id] = update.bytesTransferred;
         _progressTotals[update.id] = update.totalBytes;
         _progressStartedAt.putIfAbsent(update.id, DateTime.now);
@@ -574,7 +572,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     if (_queue.isEmpty || _connected.isEmpty || _sending) return;
     setState(() {
       _showTransferScreen = true;
-      _sessionStartedAt ??= DateTime.now();
       _sending = true;
       _status = 'جارٍ نقل الملفات عبر الاتصال الحالي...';
       _error = null;
