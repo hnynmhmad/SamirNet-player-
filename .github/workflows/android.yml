@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [main, feature/offline-file-transfer]
+    branches: [main, feature/offline-file-transfer, fix/nearby-transfer-session]
   pull_request:
     branches: [main]
   workflow_dispatch:
