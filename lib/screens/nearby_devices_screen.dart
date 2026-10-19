@@ -392,7 +392,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           _receivedNames.remove(payloadId);
           _receivedDigests.remove(payloadId);
           _payloadEndpoints.remove(payloadId);
-          _completedPayloads.remove(payloadId);
         });
       }
     } catch (e) {
@@ -539,11 +538,6 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       _status = 'جارٍ نقل الملفات عبر الاتصال الحالي...';
       _error = null;
     });
-    _progressBytes.clear();
-    _progressTotals.clear();
-    _progressNames.clear();
-    _progressStartedAt.clear();
-    _completedPayloads.clear();
     _progressRevision.value++;
     final pending = List<File>.from(_queue);
     try {
@@ -707,14 +701,14 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                   value: _formatBytes(transferred),
                   subtitle: total > 0 ? 'من ${_formatBytes(total)}' : 'بانتظار الملفات',
                 )),
-                Container(width: 1, height: 64, color: _nearbyRed.withValues(alpha: 0.45)),
+                Container(width: 1, height: 64, color: _nearbyRed.withOpacity(0.45)),
                 Expanded(child: _TransferStat(
                   icon: Icons.speed_rounded,
                   label: 'سرعة النقل',
                   value: _formatSpeed(speed),
                   subtitle: activeIds.isEmpty ? 'لا يوجد نقل نشط' : 'السرعة الحالية التقريبية',
                 )),
-                Container(width: 1, height: 64, color: _nearbyRed.withValues(alpha: 0.45)),
+                Container(width: 1, height: 64, color: _nearbyRed.withOpacity(0.45)),
                 Expanded(child: _TransferStat(
                   icon: Icons.folder_copy_outlined,
                   label: 'الإجمالي',
@@ -752,7 +746,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
                     final elapsed = started == null ? 0.0 : DateTime.now().difference(started).inMilliseconds / 1000.0;
                     final fileSpeed = elapsed > 0 ? fileBytes / elapsed : 0.0;
                     return Card(
-                      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: dark ? 0.7 : 0.55),
+                      color: theme.colorScheme.surfaceContainerHighest.withOpacity(dark ? 0.7 : 0.55),
                       child: Padding(
                         padding: const EdgeInsets.all(12),
                         child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
