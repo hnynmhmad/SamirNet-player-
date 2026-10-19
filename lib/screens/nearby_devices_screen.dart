@@ -59,9 +59,13 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   final Map<int, String> _progressNames = {};
   final Map<int, DateTime> _progressStartedAt = {};
   final Map<int, File> _openableFiles = {};
+  final Set<String> _connectingEndpoints = {};
   final ValueNotifier<int> _progressRevision = ValueNotifier<int>(0);
   bool _showTransferScreen = false;
   DateTime? _sessionStartedAt;
+  int _lastSpeedSampleBytes = 0;
+  DateTime? _lastSpeedSampleAt;
+  double _currentTransferSpeedBytesPerSecond = 0;
 
   bool _starting = false;
   bool _advertising = false;
@@ -187,6 +191,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   }
 
   void _onConnectionInitiated(String id, ConnectionInfo info) {
+    _connectingEndpoints.remove(id);
     if (!mounted) return;
     // Scanning the peer's QR is explicit consent to connect from this phone.
     // The receiving phone still confirms the request and authentication token.
@@ -244,6 +249,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   }
 
   void _onConnectionResult(String id, Status status) {
+    _connectingEndpoints.remove(id);
     if (!mounted) return;
     setState(() {
       _status = 'نتيجة الاتصال: $status';
@@ -255,6 +261,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   }
 
   void _onDisconnected(String id) {
+    _connectingEndpoints.remove(id);
     if (!mounted) return;
     setState(() {
       _connected.remove(id);
@@ -264,6 +271,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
   }
 
   Future<void> _connect(String id, String name) async {
+    if (_connected.containsKey(id) || !_connectingEndpoints.add(id)) return;
     try {
       setState(() {
         _status = 'جارٍ إنشاء اتصال مباشر عالي السرعة مع $name...';
@@ -277,6 +285,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         onDisconnected: _onDisconnected,
       );
     } catch (e) {
+      _connectingEndpoints.remove(id);
       if (mounted) setState(() => _error = 'تعذر الاتصال بالجهاز: $e');
     }
   }
@@ -324,6 +333,23 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
     _progressRevision.value++;
   }
 
+  void _refreshTransferSpeed() {
+    final now = DateTime.now();
+    final totalBytes = _progressBytes.values.fold<int>(0, (sum, value) => sum + value);
+    final previousAt = _lastSpeedSampleAt;
+    if (previousAt == null) {
+      _lastSpeedSampleAt = now;
+      _lastSpeedSampleBytes = totalBytes;
+      return;
+    }
+    final elapsed = now.difference(previousAt).inMilliseconds / 1000.0;
+    if (elapsed < 0.35) return;
+    final delta = totalBytes - _lastSpeedSampleBytes;
+    _currentTransferSpeedBytesPerSecond = delta <= 0 ? 0 : delta / elapsed;
+    _lastSpeedSampleAt = now;
+    _lastSpeedSampleBytes = totalBytes;
+  }
+
   void _onPayloadTransferUpdate(String endpointId, PayloadTransferUpdate update) {
     if (!mounted ||
         _metadataPayloads.contains(update.id) ||
@@ -346,6 +372,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
             : null;
         _status = 'جارٍ نقل ملف: ${_formatBytes(update.bytesTransferred)} من ${_formatBytes(update.totalBytes)} · ${_formatSpeed(speed)}${remaining == null ? '' : ' · متبقٍ ${_formatDuration(remaining)}'}';
       });
+      _refreshTransferSpeed();
       _progressRevision.value++;
     } else if (update.status == PayloadStatus.FAILURE) {
       final completion = _payloadCompletions.remove(update.id);
@@ -365,6 +392,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         _progressStartedAt.putIfAbsent(update.id, DateTime.now);
         _status = 'اكتمل نقل ملف (${_formatBytes(update.totalBytes)}).';
       });
+      _refreshTransferSpeed();
       _progressRevision.value++;
     }
   }
@@ -404,6 +432,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           _receivedDigests.remove(payloadId);
           _payloadEndpoints.remove(payloadId);
         });
+        _progressRevision.value++;
       }
     } catch (e) {
       if (mounted) setState(() => _error = 'وصل الملف لكن تعذر حفظه: $e');
@@ -669,12 +698,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       final bytesTotal = _progressTotals[id] ?? 0;
       return bytesTotal > 0 && bytes < bytesTotal;
     }).toList();
-    final speed = activeIds.fold<double>(0, (sum, id) {
-      final started = _progressStartedAt[id];
-      if (started == null) return sum;
-      final seconds = DateTime.now().difference(started).inMilliseconds / 1000.0;
-      return sum + (seconds > 0 ? (_progressBytes[id] ?? 0) / seconds : 0);
-    });
+    final speed = _currentTransferSpeedBytesPerSecond;
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
     final softRed = dark ? const Color(0xFF3B1C22) : const Color(0xFFFFEEEE);
