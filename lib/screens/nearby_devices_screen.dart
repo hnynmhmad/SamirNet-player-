@@ -636,7 +636,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
             padding: EdgeInsets.all(16),
             child: Text('إضافة ملفات إلى جلسة النقل الحالية', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           ),
-          ListTile(leading: const Icon(Icons.video-library_outlined, color: _nearbyRed), title: const Text('الفيديوهات والموسيقى'), onTap: () => Navigator.pop(sheetContext, 'media')),
+          ListTile(leading: const Icon(Icons.video_library_outlined, color: _nearbyRed), title: const Text('الفيديوهات والموسيقى'), onTap: () => Navigator.pop(sheetContext, 'media')),
           ListTile(leading: const Icon(Icons.insert_drive_file_outlined, color: _nearbyRed), title: const Text('ملفات أخرى'), onTap: () => Navigator.pop(sheetContext, 'files')),
           ListTile(leading: const Icon(Icons.folder_open_rounded, color: _nearbyRed), title: const Text('مجلد كامل'), onTap: () => Navigator.pop(sheetContext, 'folder')),
         ]),
