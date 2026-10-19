@@ -238,6 +238,7 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
         setState(() {
           _connected[id] = info;
           _trustedEndpoints.add(id);
+          _scanTargetName = null;
           _status = 'اتصلت بـ ${info.endpointName}. يمكنك الإرسال والاستقبال.';
           _error = null;
         });
@@ -492,8 +493,15 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
       if (match != null) {
         await _connect(match.key, match.value);
       } else {
-        setState(() => _status =
-            'تمت قراءة الرمز. انتظر ظهور الجهاز المستلم في البحث؛ سيُطلب الاتصال تلقائيًا.');
+        if (!_discovering && !_starting) await _start();
+        if (!mounted) return;
+        if (_discovering) {
+          setState(() => _status =
+              'تمت قراءة الرمز بنجاح. جارٍ انتظار ظهور الجهاز لبدء الاتصال تلقائيًا...');
+        } else {
+          setState(() => _error =
+              'تمت قراءة الرمز، لكن البحث عن الأجهزة غير نشط. تحقق من Wi-Fi وBluetooth والأذونات ثم اضغط إعادة البحث.');
+        }
       }
     } catch (e) {
       if (mounted) setState(() => _error = 'تعذر فتح ماسح QR: $e');
