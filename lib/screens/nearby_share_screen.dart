@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:file_picker/file_picker.dart';
@@ -713,19 +714,42 @@ class _ScanReceiverScreenState extends State<_ScanReceiverScreen>
       final rotation = InputImageRotationValue.fromRawValue(
         controller.description.sensorOrientation,
       );
-      final format = InputImageFormatValue.fromRawValue(image.format.raw);
-      if (rotation == null || format == null || image.planes.isEmpty) return;
-      final bytes = WriteBuffer();
-      for (final plane in image.planes) {
-        bytes.putUint8List(plane.bytes);
+      if (rotation == null || image.planes.length < 3) return;
+
+      // Convert padded CameraX YUV_420_888 planes to packed NV21. Passing the
+      // planes concatenated without respecting row/pixel strides can prevent
+      // ML Kit from decoding an otherwise visible QR code.
+      final width = image.width;
+      final height = image.height;
+      final yPlane = image.planes[0];
+      final uPlane = image.planes[1];
+      final vPlane = image.planes[2];
+      final nv21 = Uint8List(width * height * 3 ~/ 2);
+      var output = 0;
+      final yPixelStride = yPlane.bytesPerPixel ?? 1;
+      for (var row = 0; row < height; row++) {
+        final rowStart = row * yPlane.bytesPerRow;
+        for (var col = 0; col < width; col++) {
+          nv21[output++] = yPlane.bytes[rowStart + col * yPixelStride];
+        }
+      }
+      final uPixelStride = uPlane.bytesPerPixel ?? 1;
+      final vPixelStride = vPlane.bytesPerPixel ?? 1;
+      for (var row = 0; row < height ~/ 2; row++) {
+        final uRow = row * uPlane.bytesPerRow;
+        final vRow = row * vPlane.bytesPerRow;
+        for (var col = 0; col < width ~/ 2; col++) {
+          nv21[output++] = vPlane.bytes[vRow + col * vPixelStride];
+          nv21[output++] = uPlane.bytes[uRow + col * uPixelStride];
+        }
       }
       final input = InputImage.fromBytes(
-        bytes: bytes.done().buffer.asUint8List(),
+        bytes: nv21,
         metadata: InputImageMetadata(
-          size: Size(image.width.toDouble(), image.height.toDouble()),
+          size: Size(width.toDouble(), height.toDouble()),
           rotation: rotation,
-          format: format,
-          bytesPerRow: image.planes.first.bytesPerRow,
+          format: InputImageFormat.nv21,
+          bytesPerRow: width,
         ),
       );
       final barcodes = await _scanner.processImage(input);
