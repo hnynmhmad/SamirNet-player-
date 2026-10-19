@@ -188,6 +188,13 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
 
   void _onConnectionInitiated(String id, ConnectionInfo info) {
     if (!mounted) return;
+    // Scanning the peer's QR is explicit consent to connect from this phone.
+    // The receiving phone still confirms the request and authentication token.
+    if (_scanTargetName != null &&
+        _normalizeEndpointName(_scanTargetName!) == _normalizeEndpointName(info.endpointName)) {
+      unawaited(_acceptConnection(id, info));
+      return;
+    }
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -207,29 +214,33 @@ class _NearbyDevicesScreenState extends State<NearbyDevicesScreen> {
           FilledButton(
             onPressed: () async {
               Navigator.pop(dialogContext);
-              try {
-                await _nearby.acceptConnection(
-                  id,
-                  onPayLoadRecieved: _onPayloadReceived,
-                  onPayloadTransferUpdate: _onPayloadTransferUpdate,
-                );
-                if (mounted) {
-                  setState(() {
-                    _connected[id] = info;
-                    _trustedEndpoints.add(id);
-                    _status = 'اتصلت بـ ${info.endpointName}. يمكنك الإرسال والاستقبال.';
-                    _error = null;
-                  });
-                }
-              } catch (e) {
-                if (mounted) setState(() => _error = 'تعذر قبول الاتصال: $e');
-              }
+              await _acceptConnection(id, info);
             },
             child: const Text('قبول الاتصال'),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _acceptConnection(String id, ConnectionInfo info) async {
+    try {
+      await _nearby.acceptConnection(
+        id,
+        onPayLoadRecieved: _onPayloadReceived,
+        onPayloadTransferUpdate: _onPayloadTransferUpdate,
+      );
+      if (mounted) {
+        setState(() {
+          _connected[id] = info;
+          _trustedEndpoints.add(id);
+          _status = 'اتصلت بـ ${info.endpointName}. يمكنك الإرسال والاستقبال.';
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = 'تعذر قبول الاتصال: $e');
+    }
   }
 
   void _onConnectionResult(String id, Status status) {
