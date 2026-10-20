@@ -1317,6 +1317,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     controller = VideoPlayerController.file(widget.file);
     controller.initialize().then((_) async {
       final prefs = await SharedPreferences.getInstance();
+      // The background-video choice is persistent and app-wide, not per-player.
+      _videoBackgroundModeEnabled = prefs.getBool('video_background_enabled_v1') ?? false;
       final resume = prefs.getInt('resume_${widget.entry.id}') ?? 0;
       if (resume > 0 && resume < controller.value.duration.inMilliseconds - 3000) {
         await controller.seekTo(Duration(milliseconds: resume));
@@ -1397,6 +1399,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         );
         if (mounted) setState(() => ready = true);
         unawaited(_prepareVideoBackgroundQueue(handler));
+      }
+      // Apply a previously enabled background mode to every newly opened video.
+      if (_videoBackgroundModeEnabled && !_backgroundAudioActive) {
+        await _startBackgroundAudio(showFeedback: false);
       }
       _scheduleHide();
     }).catchError((Object error, StackTrace stack) async {
@@ -1571,6 +1577,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       }
     }
     if (state == AppLifecycleState.paused &&
+        _videoBackgroundModeEnabled &&
         mounted &&
         controller.value.isInitialized &&
         controller.value.isPlaying &&
@@ -1658,6 +1665,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       }
       if (_backgroundAudioActive) {
         _videoBackgroundModeEnabled = false;
+        await prefs.setBool('video_background_enabled_v1', false);
         await _backgroundPlaybackSub?.cancel();
         _backgroundPlaybackSub = null;
         final handler = await getBackgroundAudioHandler();
@@ -1720,11 +1728,14 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       await controller.setVolume(0.0);
       debugPrint('SamirNet background audio confirmed playing; video audio muted');
       _videoBackgroundModeEnabled = true;
+      await prefs.setBool('video_background_enabled_v1', true);
       if (mounted) setState(() { _backgroundAudioActive = true; _lastVideoPlaying = controller.value.isPlaying; });
       _attachBackgroundPlaybackListener(handler);
       if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يظهر إشعار التحكم، ويمكنك استخدام السابق والتالي والتقديم والإرجاع.')));
     } catch (e) {
+      // A failed activation must not leave a stale enabled preference behind.
       _videoBackgroundModeEnabled = false;
+      try { await prefs.setBool('video_background_enabled_v1', false); } catch (_) {}
       try { await controller.setVolume(1.0); } catch (_) {}
       try {
         final handler = await getBackgroundAudioHandler();
@@ -1899,7 +1910,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         Row(children: [
           IconButton(onPressed: () => Navigator.pop(context), tooltip: 'رجوع', icon: const Icon(Icons.arrow_back, color: Colors.white)),
           Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))),
-          IconButton(tooltip: _backgroundAudioActive ? 'إيقاف صوت الخلفية' : 'تشغيل الصوت في الخلفية', onPressed: _startBackgroundAudio, icon: Icon(Icons.headphones_rounded, color: _backgroundAudioActive ? coral : Colors.white)),
+          IconButton(tooltip: (_backgroundAudioActive || _videoBackgroundModeEnabled) ? 'إيقاف وضع الفيديو في الخلفية لكل الفيديوهات' : 'تفعيل وضع الفيديو في الخلفية لكل الفيديوهات', onPressed: _startBackgroundAudio, icon: Icon(Icons.headphones_rounded, color: (_backgroundAudioActive || _videoBackgroundModeEnabled) ? coral : Colors.white)),
           IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)),
           IconButton(tooltip: locked ? 'إلغاء قفل اللمس' : 'قفل اللمس', onPressed: () { setState(() { locked = !locked; if (!locked) controls = true; }); _hideTimer?.cancel(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); if (!locked) _scheduleHide(); }, icon: Icon(locked ? Icons.lock_rounded : Icons.lock_open_rounded, color: locked ? coral : Colors.white)),
           PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {
