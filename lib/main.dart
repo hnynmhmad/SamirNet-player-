@@ -315,6 +315,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final page = MaterialPageRoute(builder: (_) => PlayerScreen(entry: v, file: file, favorite: favorites.contains(v.id), playlist: _sortEntries(videos, videoSort), onFavorite: () => _favorite(v), onNavigate: (next) => _openPlayer(next, replace: true)));
     if (replace) { await Navigator.pushReplacement(context, page); } else { await Navigator.push(context, page); }
   }
+  Future<void> _reloadSharedViewPreference() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final view = prefs.getBool('global_media_grid') ??
+          prefs.getBool('video_grid') ??
+          true;
+      if (mounted) setState(() { grid = view; foldersGrid = view; });
+    } catch (error, stack) {
+      debugPrint('Could not reload shared grid/list preference: $error\\n$stack');
+    }
+  }
   Future<void> _saveViewPreferences() async {
     // One shared preference is the source of truth for videos, folders and audio.
     // Keep legacy keys synchronized so older screens migrate cleanly.
@@ -431,6 +442,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           Row(children: [
             Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () async {
             await Navigator.push(context, MaterialPageRoute(builder: (_) => VideosLibraryScreen(entries: videos, initialFavorites: favorites, onPlay: _play, onFavorite: _favorite, onDeleted: _scan)));
+      await _reloadSharedViewPreference();
             final p = await SharedPreferences.getInstance();
             final view = p.getBool('global_media_grid') ?? true;
             if (mounted) setState(() { grid = view; foldersGrid = view; });
@@ -438,6 +450,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             const SizedBox(width: 10),
             Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () async {
               await Navigator.push(context, MaterialPageRoute(builder: (_) => const AudioLibraryScreen()));
+      await _reloadSharedViewPreference();
               final prefs = await SharedPreferences.getInstance();
               final view = prefs.getBool('global_media_grid') ?? true;
               if (mounted) setState(() { grid = view; foldersGrid = view; });
