@@ -1736,7 +1736,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _backgroundQueueEntries = queueEntries;
       _lastBackgroundQueueIndex = startIndex;
       _pendingBackgroundQueueIndex = null;
-      await (handler as SNBackgroundAudioHandler).playQueueInBackground(
+      await handler.playQueueInBackground(
         queueFiles,
         queueTitles,
         startIndex,
