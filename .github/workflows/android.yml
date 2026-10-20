@@ -469,7 +469,7 @@ jobs:
                               result.error("MEDIA3_COMMAND_FAILED", error.message, null)
                           }
                       }
-'''
+              '''
               if needle not in source:
                   raise SystemExit('Could not find configureFlutterEngine closing point for Media3 channel')
               source = source.replace(needle, '\n' + insertion + '    }\n}', 1)
