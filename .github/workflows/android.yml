@@ -384,9 +384,20 @@ jobs:
                   </intent-filter>
               </receiver>
           '''
-          if 'com.ryanheise.audioservice.AudioService' not in manifest:
-              manifest = manifest.replace('</application>', service + '    </application>', 1)
-          if 'com.ryanheise.audioservice.AudioService' in manifest or 'com.ryanheise.audioservice.MediaButtonReceiver' in manifest:
+          # Media3 is the sole owner of playback notifications and media buttons.
+          # Do not add the legacy audio_service service or receiver.
+          import re
+          text = re.sub(
+              r'\s*<service\b(?=[^>]*android:name="com\.ryanheise\.audioservice\.AudioService")[\s\S]*?</service>',
+              '',
+              text,
+          )
+          text = re.sub(
+              r'\s*<receiver\b(?=[^>]*android:name="com\.ryanheise\.audioservice\.MediaButtonReceiver")[\s\S]*?</receiver>',
+              '',
+              text,
+          )
+          if 'com.ryanheise.audioservice.AudioService' in text or 'com.ryanheise.audioservice.MediaButtonReceiver' in text:
               raise SystemExit('Legacy audio_service components conflict with Media3 notification ownership')
           path.write_text(manifest)
           import xml.etree.ElementTree as ET
