@@ -387,17 +387,17 @@ jobs:
           # Media3 is the sole owner of playback notifications and media buttons.
           # Do not add the legacy audio_service service or receiver.
           import re
-          text = re.sub(
+          manifest = re.sub(
               r'\s*<service\b(?=[^>]*android:name="com\.ryanheise\.audioservice\.AudioService")[\s\S]*?</service>',
               '',
-              text,
+              manifest,
           )
-          text = re.sub(
+          manifest = re.sub(
               r'\s*<receiver\b(?=[^>]*android:name="com\.ryanheise\.audioservice\.MediaButtonReceiver")[\s\S]*?</receiver>',
               '',
-              text,
+              manifest,
           )
-          if 'com.ryanheise.audioservice.AudioService' in text or 'com.ryanheise.audioservice.MediaButtonReceiver' in manifest:
+          if 'com.ryanheise.audioservice.AudioService' in manifest or 'com.ryanheise.audioservice.MediaButtonReceiver' in manifest:
               raise SystemExit('Legacy audio_service components conflict with Media3 notification ownership')
           path.write_text(manifest)
           import xml.etree.ElementTree as ET
