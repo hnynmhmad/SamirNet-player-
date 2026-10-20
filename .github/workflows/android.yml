@@ -420,6 +420,10 @@ jobs:
                           try {
                               val intent = Intent(this, SMPlayerMediaSessionService::class.java)
                               when (call.method) {
+                                  "getState" -> {
+                                      result.success(SMPlayerMediaSessionService.currentState())
+                                      return@setMethodCallHandler
+                                  }
                                   "playQueue" -> {
                                       val paths = (call.argument<List<String>>("paths") ?: emptyList()).toCollection(ArrayList())
                                       val titles = (call.argument<List<String>>("titles") ?: emptyList()).toCollection(ArrayList())
@@ -503,6 +507,7 @@ jobs:
               private lateinit var mediaSession: MediaSession
 
               override fun onCreate() {
+                  instance = this
                   super.onCreate()
                   player = ExoPlayer.Builder(this).build().apply {
                       setAudioAttributes(
@@ -525,6 +530,13 @@ jobs:
                       })
                       .build()
               }
+
+              fun currentStateMap(): Map<String, Any> = mapOf(
+                  "isPlaying" to player.isPlaying,
+                  "positionMs" to player.currentPosition.coerceAtLeast(0L),
+                  "durationMs" to player.duration.coerceAtLeast(0L),
+                  "index" to player.currentMediaItemIndex
+              )
 
               override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
 
@@ -577,12 +589,17 @@ jobs:
               }
 
               override fun onDestroy() {
+                  if (instance === this) instance = null
                   mediaSession.release()
                   player.release()
                   super.onDestroy()
               }
 
               companion object {
+                  @Volatile private var instance: SMPlayerMediaSessionService? = null
+                  fun currentState(): Map<String, Any> = instance?.currentStateMap() ?: mapOf(
+                      "isPlaying" to false, "positionMs" to 0L, "durationMs" to 0L, "index" to -1
+                  )
                   const val EXTRA_ACTION = "smplayer.action"
                   const val EXTRA_PATHS = "smplayer.paths"
                   const val EXTRA_TITLES = "smplayer.titles"
