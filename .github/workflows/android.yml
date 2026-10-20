@@ -397,7 +397,7 @@ jobs:
               '',
               text,
           )
-          if 'com.ryanheise.audioservice.AudioService' in text or 'com.ryanheise.audioservice.MediaButtonReceiver' in text:
+          if 'com.ryanheise.audioservice.AudioService' in text or 'com.ryanheise.audioservice.MediaButtonReceiver' in manifest:
               raise SystemExit('Legacy audio_service components conflict with Media3 notification ownership')
           path.write_text(manifest)
           import xml.etree.ElementTree as ET
