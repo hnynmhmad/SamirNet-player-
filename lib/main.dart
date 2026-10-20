@@ -292,11 +292,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final p = await SharedPreferences.getInstance(); await p.setStringList('favorites', favorites.toList());
   }
   Future<void> _play(MediaEntry v) async {
+    // Persisting history is best-effort only: a preferences/plugin error must
+    // never prevent the user from opening a video.
     newMediaIds.remove(v.id);
-    final p = await SharedPreferences.getInstance();
-    await p.setStringList('new_media_ids', newMediaIds.toList());
-    history.remove(v.id); history.insert(0, v.id); history = history.take(100).toList();
-    await p.setStringList('history', history);
+    history.remove(v.id);
+    history.insert(0, v.id);
+    history = history.take(100).toList();
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setStringList('new_media_ids', newMediaIds.toList());
+      await p.setStringList('history', history);
+    } catch (error, stack) {
+      debugPrint('Could not persist video history; continuing playback: $error\\n$stack');
+    }
     if (!mounted) return;
     await _openPlayer(v, replace: false);
     if (mounted) setState(() {});
@@ -475,13 +483,22 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
   Future<void> _openFolder(String path, List<MediaEntry> entries) async {
     seenFolderPaths.add(path);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('seen_folder_paths', seenFolderPaths.toList());
+    // Folder navigation must not depend on preferences being available.
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('seen_folder_paths', seenFolderPaths.toList());
+    } catch (error, stack) {
+      debugPrint('Could not persist seen folders; continuing navigation: $error\\n$stack');
+    }
     if (!mounted) return;
     await Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: _folderLabel(path), entries: entries, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)));
-    final viewPrefs = await SharedPreferences.getInstance();
-    final view = viewPrefs.getBool('global_media_grid') ?? true;
-    if (mounted) setState(() { grid = view; foldersGrid = view; });
+    try {
+      final viewPrefs = await SharedPreferences.getInstance();
+      final view = viewPrefs.getBool('global_media_grid') ?? true;
+      if (mounted) setState(() { grid = view; foldersGrid = view; });
+    } catch (error, stack) {
+      debugPrint('Could not reload shared media view preference: $error\\n$stack');
+    }
   }
   Widget _folders() {
     final groups = <String, List<MediaEntry>>{};
