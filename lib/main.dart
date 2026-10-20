@@ -559,6 +559,7 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
     final p = await SharedPreferences.getInstance();
     await p.setString('video_sort', sort);
     await p.setBool('video_grid', grid);
+    await p.setBool('folders_grid', grid);
     await p.setBool('global_media_grid', grid);
   }
   final Set<String> selected = {};
