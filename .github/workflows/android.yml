@@ -413,7 +413,7 @@ jobs:
           if 'com.samirnet.snplayer/media3' in source:
               print('Native Media3 Flutter channel already present.')
           else:
-              needle = '\\n    }\\n}'
+              needle = '\n    }\n}'
               insertion = r'''
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.samirnet.snplayer/media3")
                       .setMethodCallHandler { call, result ->
@@ -468,7 +468,7 @@ jobs:
 '''
               if needle not in source:
                   raise SystemExit('Could not find configureFlutterEngine closing point for Media3 channel')
-              source = source.replace(needle, '\\n' + insertion + '    }\\n}', 1)
+              source = source.replace(needle, '\n' + insertion + '    }\n}', 1)
               path.write_text(source)
           print('Verified Flutter method channel for native Media3 queue and transport controls.')
           PY
