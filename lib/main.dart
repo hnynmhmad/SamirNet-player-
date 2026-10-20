@@ -523,7 +523,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return Column(children: [
       Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 8), child: Row(children: [
         const Expanded(child: Text('المجلدات', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800))),
-        IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () { setState(() { grid = !grid; foldersGrid = grid; }); _saveViewPreferences(); }, icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
       ])),
       Expanded(child: entries.isEmpty ? const Center(child: Text('لا توجد مجلدات فيديو متاحة')) : foldersGrid
         ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.35, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (context, i) {
@@ -645,7 +644,6 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
           final files = items.where((v) => selected.contains(v.id)).toList();
           Navigator.push(context, MaterialPageRoute(builder: (_) => InternalSendScreen(entries: files)));
         }, icon: const Icon(Icons.send_rounded)),
-        IconButton(tooltip: 'تغيير العرض', onPressed: () { setState(() => grid = !grid); _saveViewPrefs(); }, icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
         PopupMenuButton<String>(tooltip: 'ترتيب الفيديوهات', icon: const Icon(Icons.sort), onSelected: (v) { setState(() => sort = v); _saveViewPrefs(); }, itemBuilder: (_) => const [
           PopupMenuItem(value: 'nameAsc', child: Text('الاسم: أ إلى ي')),
           PopupMenuItem(value: 'nameDesc', child: Text('الاسم: ي إلى أ')),
@@ -816,7 +814,6 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
     final items = _sortEntries(selectedFolder == null ? audio : (groups[selectedFolder] ?? <MediaEntry>[]), sort);
     return Directionality(textDirection: TextDirection.rtl, child: Scaffold(
       appBar: AppBar(title: Text(selectedFolder == null ? 'الصوتيات' : _folderLabel(selectedFolder!)), actions: [
-        IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () async { final next = !grid; final p = await SharedPreferences.getInstance(); await p.setBool('global_media_grid', next); await p.setBool('video_grid', next); await p.setBool('folders_grid', next); if (mounted) setState(() => grid = next); }, icon: Icon(grid ? Icons.view_list_rounded : Icons.grid_view_rounded)),
         PopupMenuButton<String>(tooltip: 'ترتيب الوسائط', icon: const Icon(Icons.sort), onSelected: (v) async { final p = await SharedPreferences.getInstance(); await p.setString('video_sort', v); if (mounted) setState(() => sort = v); }, itemBuilder: (_) => const [PopupMenuItem(value: 'dateDesc', child: Text('الأحدث أولًا')), PopupMenuItem(value: 'dateAsc', child: Text('الأقدم أولًا')), PopupMenuItem(value: 'nameAsc', child: Text('الاسم: أ إلى ي')), PopupMenuItem(value: 'nameDesc', child: Text('الاسم: ي إلى أ')), PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')), PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا'))]),
         IconButton(tooltip: 'تحديث الصوتيات', onPressed: _load, icon: const Icon(Icons.refresh)),
         if (selectedFolder != null) IconButton(tooltip: 'رجوع للمجلدات', onPressed: () => setState(() => selectedFolder = null), icon: const Icon(Icons.folder)),
