@@ -308,10 +308,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (replace) { await Navigator.pushReplacement(context, page); } else { await Navigator.push(context, page); }
   }
   Future<void> _saveViewPreferences() async {
+    // One shared preference is the source of truth for videos, folders and audio.
+    // Keep legacy keys synchronized so older screens migrate cleanly.
     final p = await SharedPreferences.getInstance();
-    await p.setBool('video_grid', grid);
-    await p.setBool('folders_grid', foldersGrid);
     await p.setBool('global_media_grid', grid);
+    await p.setBool('video_grid', grid);
+    await p.setBool('folders_grid', grid);
+    foldersGrid = grid;
     await p.setString('video_sort', videoSort);
   }
   void _toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
@@ -478,7 +481,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return Column(children: [
       Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 8), child: Row(children: [
         const Expanded(child: Text('المجلدات', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800))),
-        IconButton(tooltip: foldersGrid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () { setState(() => foldersGrid = !foldersGrid); _saveViewPreferences(); }, icon: Icon(foldersGrid ? Icons.view_list : Icons.grid_view)),
+        IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () { setState(() { grid = !grid; foldersGrid = grid; }); _saveViewPreferences(); }, icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
       ])),
       Expanded(child: entries.isEmpty ? const Center(child: Text('لا توجد مجلدات فيديو متاحة')) : foldersGrid
         ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.35, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (context, i) {
@@ -505,7 +508,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       RadioListTile<ThemeMode>(title: const Text('اتباع مظهر النظام'), value: ThemeMode.system, groupValue: widget.mode, onChanged: (v) { if (v != null) widget.onMode(v); }),
       RadioListTile<ThemeMode>(title: const Text('الوضع الفاتح'), value: ThemeMode.light, groupValue: widget.mode, onChanged: (v) { if (v != null) widget.onMode(v); }),
       RadioListTile<ThemeMode>(title: const Text('الوضع الداكن'), value: ThemeMode.dark, groupValue: widget.mode, onChanged: (v) { if (v != null) widget.onMode(v); }),
-      SwitchListTile(value: grid, onChanged: (v) { setState(() => grid = v); _saveViewPreferences(); }, title: const Text('عرض الشبكة'), subtitle: const Text('إيقاف الخيار يعرض الملفات في قائمة')),
+      SwitchListTile(value: grid, onChanged: (v) { setState(() { grid = v; foldersGrid = v; }); _saveViewPreferences(); }, title: const Text('عرض الشبكة'), subtitle: const Text('إيقاف الخيار يعرض الفيديوهات والمجلدات والموسيقى في قائمة')),
       ListTile(leading: const Icon(Icons.refresh), title: const Text('تحديث مكتبة الوسائط'), onTap: _scan),
       ListTile(leading: const Icon(Icons.lock_outline, color: coral), title: const Text('الخزنة الخاصة'), subtitle: const Text('تشفير ملفاتك وحمايتها برقم سري'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VaultScreen()))),
       ListTile(leading: const CircleAvatar(backgroundColor: coral, child: Icon(Icons.swap_vert_rounded, color: Colors.white)), title: const Text('نقل الملفات دون إنترنت', style: TextStyle(fontWeight: FontWeight.bold)), subtitle: const Text('إرسال واستقبال الملفات مباشرة بين الهاتفين'), trailing: const Icon(Icons.chevron_left), onTap: _openTransferChooser),
@@ -770,7 +773,7 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
     final items = _sortEntries(selectedFolder == null ? audio : (groups[selectedFolder] ?? <MediaEntry>[]), sort);
     return Directionality(textDirection: TextDirection.rtl, child: Scaffold(
       appBar: AppBar(title: Text(selectedFolder == null ? 'الصوتيات' : _folderLabel(selectedFolder!)), actions: [
-        IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () async { final next = !grid; final p = await SharedPreferences.getInstance(); await p.setBool('global_media_grid', next); await p.setBool('video_grid', next); if (mounted) setState(() => grid = next); }, icon: Icon(grid ? Icons.view_list_rounded : Icons.grid_view_rounded)),
+        IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () async { final next = !grid; final p = await SharedPreferences.getInstance(); await p.setBool('global_media_grid', next); await p.setBool('video_grid', next); await p.setBool('folders_grid', next); if (mounted) setState(() => grid = next); }, icon: Icon(grid ? Icons.view_list_rounded : Icons.grid_view_rounded)),
         PopupMenuButton<String>(tooltip: 'ترتيب الوسائط', icon: const Icon(Icons.sort), onSelected: (v) async { final p = await SharedPreferences.getInstance(); await p.setString('video_sort', v); if (mounted) setState(() => sort = v); }, itemBuilder: (_) => const [PopupMenuItem(value: 'dateDesc', child: Text('الأحدث أولًا')), PopupMenuItem(value: 'dateAsc', child: Text('الأقدم أولًا')), PopupMenuItem(value: 'nameAsc', child: Text('الاسم: أ إلى ي')), PopupMenuItem(value: 'nameDesc', child: Text('الاسم: ي إلى أ')), PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')), PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا'))]),
         IconButton(tooltip: 'تحديث الصوتيات', onPressed: _load, icon: const Icon(Icons.refresh)),
         if (selectedFolder != null) IconButton(tooltip: 'رجوع للمجلدات', onPressed: () => setState(() => selectedFolder = null), icon: const Icon(Icons.folder)),
@@ -1197,8 +1200,9 @@ class _FolderVideosScreenState extends State<FolderVideosScreen> {
   Future<void> _saveViewPrefs() async {
     final p = await SharedPreferences.getInstance();
     await p.setString('video_sort', sort);
-    await p.setBool('video_grid', grid);
     await p.setBool('global_media_grid', grid);
+    await p.setBool('video_grid', grid);
+    await p.setBool('folders_grid', grid);
   }
   List<MediaEntry> get sortedEntries => _sortEntries(widget.entries, sort);
   @override
@@ -1313,9 +1317,27 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       final modePrefs = await SharedPreferences.getInstance();
       await controller.setLooping(modePrefs.getBool('video_repeat_v1') ?? false);
 
+      // Video playback must not depend on notification/session initialization.
+      // If the media-session plugin fails, still play the selected file rather
+      // than leaving the player on a permanent loading screen.
+      final AudioHandler handler;
+      try {
+        handler = await getBackgroundAudioHandler();
+      } catch (error, stack) {
+        debugPrint('Media session unavailable; continuing foreground video playback: $error\\n$stack');
+        await controller.play();
+        if (mounted) {
+          setState(() => ready = true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('يعمل الفيديو، لكن تعذّر تفعيل إشعار التحكم بالوسائط.')),
+          );
+        }
+        _scheduleHide();
+        return;
+      }
+
       // If a notification skip changed the active video, attach this screen to the
       // existing media session rather than starting a second audible playback.
-      final handler = await getBackgroundAudioHandler();
       final activeItem = handler.mediaItem.value;
       if (_videoBackgroundModeEnabled &&
           handler is SNBackgroundAudioHandler &&
