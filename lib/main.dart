@@ -1298,6 +1298,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   int? _lastBackgroundQueueIndex;
   int? _pendingBackgroundQueueIndex;
   DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastPositionSync = DateTime.fromMillisecondsSinceEpoch(0);
   bool? _lastVideoPlaying;
   bool _syncingBackgroundAudio = false;
   bool _backgroundAudioStarting = false;
@@ -1434,6 +1435,22 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _foregroundHandler?.syncForegroundVideoState();
     }
     if (_backgroundAudioActive && !_syncingBackgroundAudio && controller.value.isInitialized) {
+      // While the player is visible, keep the background audio clock aligned
+      // with the actual video controller. In background, Media3 remains master.
+      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+          DateTime.now().difference(_lastPositionSync).inMilliseconds >= 500) {
+        final handler = _foregroundHandler;
+        if (handler != null) {
+          final delta = (handler.playbackState.value.position - controller.value.position).inMilliseconds.abs();
+          if (delta > 700) {
+            _lastPositionSync = DateTime.now();
+            _syncingBackgroundAudio = true;
+            unawaited(handler.seek(controller.value.position).catchError((Object error) {
+              debugPrint('Foreground-to-background position synchronization failed: $error');
+            }).whenComplete(() { _syncingBackgroundAudio = false; }));
+          }
+        }
+      }
       final playing = controller.value.isPlaying;
       if (_lastVideoPlaying != playing) {
         _lastVideoPlaying = playing;
@@ -1619,7 +1636,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       }
       final positionDelta =
           (state.position - controller.value.position).inMilliseconds.abs();
-      if (positionDelta > 1800 && !_syncingBackgroundAudio) {
+      if (positionDelta > 700 && !_syncingBackgroundAudio) {
         _syncingBackgroundAudio = true;
         try {
           // Seeking from the Android notification must move the visible video too.
@@ -1735,7 +1752,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     } catch (e) {
       // A failed activation must not leave a stale enabled preference behind.
       _videoBackgroundModeEnabled = false;
-      try { await prefs.setBool('video_background_enabled_v1', false); } catch (_) {}
+      try {
+        final failedPrefs = await SharedPreferences.getInstance();
+        await failedPrefs.setBool('video_background_enabled_v1', false);
+      } catch (_) {}
       try { await controller.setVolume(1.0); } catch (_) {}
       try {
         final handler = await getBackgroundAudioHandler();
