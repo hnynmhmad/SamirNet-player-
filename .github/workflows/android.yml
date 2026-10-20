@@ -397,6 +397,81 @@ jobs:
                   raise SystemExit('Missing media permission after manifest update: ' + permission)
           print('Configured and validated foreground media playback service, media buttons, and Android notification permissions.')
           PY
+      - name: Wire Flutter to the native Media3 playback service
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          expected = 'com.samirnet.snplayer'
+          roots = [Path('android/app/src/main/kotlin'), Path('android/app/src/main/java')]
+          matches = [p for root in roots if root.exists() for p in root.rglob('MainActivity.kt')]
+          if len(matches) != 1:
+              raise SystemExit(f'Expected one Kotlin MainActivity, found {len(matches)}')
+          path = matches[0]
+          source = path.read_text()
+          if 'com.samirnet.snplayer/media3' in source:
+              print('Native Media3 Flutter channel already present.')
+          else:
+              needle = '\\n    }\\n}'
+              insertion = r'''
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.samirnet.snplayer/media3")
+                      .setMethodCallHandler { call, result ->
+                          try {
+                              val intent = Intent(this, SMPlayerMediaSessionService::class.java)
+                              when (call.method) {
+                                  "playQueue" -> {
+                                      val paths = (call.argument<List<String>>("paths") ?: emptyList()).toCollection(ArrayList())
+                                      val titles = (call.argument<List<String>>("titles") ?: emptyList()).toCollection(ArrayList())
+                                      if (paths.isEmpty() || paths.size != titles.size) {
+                                          result.error("INVALID_QUEUE", "The media queue is empty or mismatched", null)
+                                          return@setMethodCallHandler
+                                      }
+                                      intent.putExtra(SMPlayerMediaSessionService.EXTRA_ACTION, SMPlayerMediaSessionService.ACTION_PLAY_QUEUE)
+                                      intent.putStringArrayListExtra(SMPlayerMediaSessionService.EXTRA_PATHS, paths)
+                                      intent.putStringArrayListExtra(SMPlayerMediaSessionService.EXTRA_TITLES, titles)
+                                      intent.putExtra(SMPlayerMediaSessionService.EXTRA_INDEX, call.argument<Int>("index") ?: 0)
+                                      intent.putExtra(SMPlayerMediaSessionService.EXTRA_POSITION_MS, call.argument<Number>("positionMs")?.toLong() ?: 0L)
+                                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+                                  }
+                                  "play", "pause", "stop", "skipNext", "skipPrevious", "seek", "setSpeed", "setRepeatMode", "setShuffle" -> {
+                                      val action = when (call.method) {
+                                          "play" -> SMPlayerMediaSessionService.ACTION_PLAY
+                                          "pause" -> SMPlayerMediaSessionService.ACTION_PAUSE
+                                          "stop" -> SMPlayerMediaSessionService.ACTION_STOP
+                                          "skipNext" -> SMPlayerMediaSessionService.ACTION_SKIP_NEXT
+                                          "skipPrevious" -> SMPlayerMediaSessionService.ACTION_SKIP_PREVIOUS
+                                          "seek" -> SMPlayerMediaSessionService.ACTION_SEEK
+                                          "setSpeed" -> SMPlayerMediaSessionService.ACTION_SET_SPEED
+                                          "setRepeatMode" -> SMPlayerMediaSessionService.ACTION_SET_REPEAT
+                                          else -> SMPlayerMediaSessionService.ACTION_SET_SHUFFLE
+                                      }
+                                      intent.putExtra(SMPlayerMediaSessionService.EXTRA_ACTION, action)
+                                      when (call.method) {
+                                          "seek" -> intent.putExtra(SMPlayerMediaSessionService.EXTRA_POSITION_MS, call.argument<Number>("positionMs")?.toLong() ?: 0L)
+                                          "setSpeed" -> intent.putExtra(SMPlayerMediaSessionService.EXTRA_SPEED, (call.argument<Number>("speed")?.toFloat() ?: 1f))
+                                          "setRepeatMode" -> intent.putExtra(SMPlayerMediaSessionService.EXTRA_REPEAT_MODE, call.argument<Int>("mode") ?: 0)
+                                          "setShuffle" -> intent.putExtra(SMPlayerMediaSessionService.EXTRA_SHUFFLE, call.argument<Boolean>("enabled") ?: false)
+                                      }
+                                      startService(intent)
+                                  }
+                                  else -> {
+                                      result.notImplemented()
+                                      return@setMethodCallHandler
+                                  }
+                              }
+                              result.success(true)
+                          } catch (error: Exception) {
+                              result.error("MEDIA3_COMMAND_FAILED", error.message, null)
+                          }
+                      }
+'''
+              if needle not in source:
+                  raise SystemExit('Could not find configureFlutterEngine closing point for Media3 channel')
+              source = source.replace(needle, '\\n' + insertion + '    }\\n}', 1)
+              path.write_text(source)
+          print('Verified Flutter method channel for native Media3 queue and transport controls.')
+          PY
       - name: Add native AndroidX Media3 playback service
         shell: bash
         run: |
