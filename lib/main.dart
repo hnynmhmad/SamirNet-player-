@@ -1360,6 +1360,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         final currentState = handler.playbackState.value;
         final currentItem = handler.mediaItem.value;
         if (currentItem?.id == widget.file.path) {
+          _foregroundHandler = handler;
           await controller.setVolume(0.0);
           if (currentState.position > Duration.zero) {
             await controller.seekTo(currentState.position);
@@ -1708,6 +1709,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       if (!controller.value.isPlaying) await controller.play();
       await prefs.setInt('resume_${widget.entry.id}', resumePosition.inMilliseconds);
       final handler = await getBackgroundAudioHandler();
+      if (handler is! SNBackgroundAudioHandler) {
+        throw StateError('خدمة تشغيل الخلفية غير جاهزة');
+      }
+      _foregroundHandler = handler;
 
       // Build the same video order into the Android media queue so notification
       // Previous/Next can change tracks, not merely restart the current video.
