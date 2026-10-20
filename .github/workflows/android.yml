@@ -757,8 +757,15 @@ jobs:
                   raise SystemExit('Missing media permission: ' + permission)
           print('Verified Android media permissions, manifest XML, and SM Player label')
           PY
-      - name: Resolve dependencies
-        run: flutter pub get
+      - name: Clean generated Flutter and Android plugin state
+        run: |
+          flutter clean
+          rm -rf .dart_tool build android/.gradle
+          rm -f pubspec.lock
+      - name: Resolve dependencies reproducibly
+        run: |
+          flutter pub get
+          flutter pub deps --style=compact | grep -E 'shared_preferences(_android)? ' 
       - name: Normalize Android plugin compile SDK versions
         shell: bash
         run: |
