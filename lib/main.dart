@@ -421,7 +421,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (tab == 0) ...[
           const SizedBox(height: 4),
           Row(children: [
-            Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () { Navigator.push(context, MaterialPageRoute(builder: (_) => VideosLibraryScreen(entries: videos, initialFavorites: favorites, onPlay: _play, onFavorite: _favorite, onDeleted: _scan))); })),
+            Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () async {
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => VideosLibraryScreen(entries: videos, initialFavorites: favorites, onPlay: _play, onFavorite: _favorite, onDeleted: _scan)));
+            final p = await SharedPreferences.getInstance();
+            final view = p.getBool('global_media_grid') ?? true;
+            if (mounted) setState(() { grid = view; foldersGrid = view; });
+          })),
             const SizedBox(width: 10),
             Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () async {
               await Navigator.push(context, MaterialPageRoute(builder: (_) => const AudioLibraryScreen()));
@@ -1278,6 +1283,7 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver {
   late final VideoPlayerController controller;
   bool ready = false, controls = true, locked = false, fillScreen = false, _longPressActive = false, _backgroundAudioActive = false;
+  String? _videoOpenError;
   bool _isFavorite = false, _repeat = false, _shuffle = false;
   int _playlistIndex = 0;
   Duration _seekStartPosition = Duration.zero;
@@ -1317,6 +1323,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight, DeviceOrientation.portraitUp]);
     controller = VideoPlayerController.file(widget.file);
     controller.initialize().then((_) async {
+      // Start visible playback immediately after the decoder is ready. Preference
+      // reads and media-session setup must never hold the video behind a spinner.
+      await controller.play();
+      if (mounted) setState(() { ready = true; _videoOpenError = null; });
       final prefs = await SharedPreferences.getInstance();
       // The background-video choice is persistent and app-wide, not per-player.
       _videoBackgroundModeEnabled = prefs.getBool('video_background_enabled_v1') ?? false;
@@ -1327,17 +1337,15 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       final modePrefs = await SharedPreferences.getInstance();
       await controller.setLooping(modePrefs.getBool('video_repeat_v1') ?? false);
 
-      // Video playback must not depend on notification/session initialization.
-      // If the media-session plugin fails, still play the selected file rather
-      // than leaving the player on a permanent loading screen.
+      // Video playback already started above; notification/session setup is optional.
+      // If the media-session plugin fails, keep the visible video running.
       final AudioHandler handler;
       try {
         handler = await getBackgroundAudioHandler();
       } catch (error, stack) {
         debugPrint('Media session unavailable; continuing foreground video playback: $error\\n$stack');
-        await controller.play();
         if (mounted) {
-          setState(() => ready = true);
+          setState(() { ready = controller.value.isInitialized; _videoOpenError = null; });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('يعمل الفيديو، لكن تعذّر تفعيل إشعار التحكم بالوسائط.')),
           );
@@ -1419,7 +1427,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         debugPrint('Foreground video fallback playback failed: $playError');
       }
       if (mounted) {
-        setState(() => ready = controller.value.isInitialized);
+        setState(() {
+          ready = controller.value.isInitialized;
+          _videoOpenError = controller.value.isInitialized ? null : 'تعذر فتح الفيديو: $error';
+        });
         if (controller.value.isInitialized) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('تعذر تفعيل بعض أدوات التحكم؛ تمت محاولة تشغيل الفيديو مباشرة.')),
@@ -1929,7 +1940,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   Widget build(BuildContext context) {
     final v = controller.value;
     return Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTap: () {}, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, onLongPressStart: locked ? null : _beginSpeedBoost, onLongPressEnd: locked ? null : (_) => _endSpeedBoost(), onHorizontalDragStart: locked ? null : _horizontalSeekStart, onHorizontalDragUpdate: locked ? null : _horizontalSeekUpdate, onHorizontalDragEnd: (_) => _gestureStart = null, onVerticalDragStart: locked ? null : _gestureStartAt, onVerticalDragUpdate: locked ? null : _gestureUpdate, onVerticalDragEnd: (_) => _gestureStart = null, child: Stack(alignment: Alignment.center, children: [
-      if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: VideoPlayer(controller))))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: VideoPlayer(controller)))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
+      if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: VideoPlayer(controller))))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: VideoPlayer(controller)))) else if (_videoOpenError != null || v.hasError) Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.error_outline, color: Colors.white70, size: 44), const SizedBox(height: 12), Text(_videoOpenError ?? 'تعذّر تشغيل هذا الملف', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)), const SizedBox(height: 12), FilledButton.icon(onPressed: () { setState(() { _videoOpenError = null; ready = false; }); controller.initialize().then((_) async { await controller.play(); if (mounted) setState(() => ready = true); }).catchError((Object e) { if (mounted) setState(() => _videoOpenError = 'تعذرت إعادة المحاولة: $e'); }); }, icon: const Icon(Icons.refresh), label: const Text('إعادة المحاولة'))]))) else const CircularProgressIndicator(color: coral),
       if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),
       if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
         Row(children: [
