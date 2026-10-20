@@ -423,7 +423,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
           Row(children: [
             Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () { Navigator.push(context, MaterialPageRoute(builder: (_) => VideosLibraryScreen(entries: videos, initialFavorites: favorites, onPlay: _play, onFavorite: _favorite, onDeleted: _scan))); })),
             const SizedBox(width: 10),
-            Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AudioLibraryScreen())))),
+            Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () async {
+              await Navigator.push(context, MaterialPageRoute(builder: (_) => const AudioLibraryScreen()));
+              final prefs = await SharedPreferences.getInstance();
+              final view = prefs.getBool('global_media_grid') ?? true;
+              if (mounted) setState(() { grid = view; foldersGrid = view; });
+            })),
           ]),
           const SizedBox(height: 10),
           Row(children: [
@@ -469,7 +474,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await prefs.setStringList('seen_folder_paths', seenFolderPaths.toList());
     if (!mounted) return;
     await Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: _folderLabel(path), entries: entries, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)));
-    if (mounted) setState(() {});
+    final prefs = await SharedPreferences.getInstance();
+    final view = prefs.getBool('global_media_grid') ?? true;
+    if (mounted) setState(() { grid = view; foldersGrid = view; });
   }
   Widget _folders() {
     final groups = <String, List<MediaEntry>>{};
@@ -490,7 +497,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           })
         : ListView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, itemBuilder: (context, i) {
             final e = entries[i];
-            return Card(child: ListTile(leading: const Icon(Icons.folder_rounded, color: coral), title: Text(_folderLabel(e.key), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(e.value.any((v) => newMediaIds.contains(v.id)) && !seenFolderPaths.contains(e.key) ? 'NEW · ${e.value.length} فيديو' : '${e.value.length} فيديو', style: TextStyle(color: e.value.any((v) => newMediaIds.contains(v.id)) && !seenFolderPaths.contains(e.key) ? coral : null)), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: e.key, entries: e.value, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)))));
+            return Card(child: ListTile(leading: const Icon(Icons.folder_rounded, color: coral), title: Text(_folderLabel(e.key), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(e.value.any((v) => newMediaIds.contains(v.id)) && !seenFolderPaths.contains(e.key) ? 'NEW · ${e.value.length} فيديو' : '${e.value.length} فيديو', style: TextStyle(color: e.value.any((v) => newMediaIds.contains(v.id)) && !seenFolderPaths.contains(e.key) ? coral : null)), trailing: const Icon(Icons.chevron_left), onTap: () => _openFolder(e.key, e.value))));
           })),
     ]);
   }
@@ -1392,9 +1399,26 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         unawaited(_prepareVideoBackgroundQueue(handler));
       }
       _scheduleHide();
-    }).catchError((Object error) {
-      if (mounted) setState(() => ready = false);
-      debugPrint('Video player initialization failed: $error');
+    }).catchError((Object error, StackTrace stack) async {
+      // Session/notification setup is optional: an error there must not disable
+      // the actual video player after the file controller has initialized.
+      debugPrint('Video player/session initialization reported an error: $error\\n$stack');
+      try {
+        if (controller.value.isInitialized && !controller.value.isPlaying) {
+          await controller.play();
+        }
+      } catch (playError) {
+        debugPrint('Foreground video fallback playback failed: $playError');
+      }
+      if (mounted) {
+        setState(() => ready = controller.value.isInitialized);
+        if (controller.value.isInitialized) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تعذر تفعيل بعض أدوات التحكم؛ تمت محاولة تشغيل الفيديو مباشرة.')),
+          );
+        }
+      }
+      _scheduleHide();
     });
     controller.addListener(_update);
   }
