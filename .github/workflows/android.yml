@@ -635,16 +635,16 @@ jobs:
               block = 'dependencies {'
               if block not in text:
                   raise SystemExit('Could not find dependencies block in ' + str(gradle))
-              additions = ''.join(f'    implementation("{dep}")\\n' for dep in dependencies)
+              additions = ''.join(f'    implementation("{dep}")\n' for dep in dependencies)
               if dependencies[0] not in text:
-                  text = text.replace(block, block + '\\n' + additions, 1)
+                  text = text.replace(block, block + '\n' + additions, 1)
           else:
               block = 'dependencies {'
               if block not in text:
                   raise SystemExit('Could not find dependencies block in ' + str(gradle))
-              additions = ''.join(f"    implementation '{dep}'\\n" for dep in dependencies)
+              additions = ''.join(f"    implementation '{dep}'\n" for dep in dependencies)
               if dependencies[0] not in text:
-                  text = text.replace(block, block + '\\n' + additions, 1)
+                  text = text.replace(block, block + '\n' + additions, 1)
           gradle.write_text(text)
 
           manifest_path = Path('android/app/src/main/AndroidManifest.xml')
