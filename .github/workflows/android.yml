@@ -386,8 +386,8 @@ jobs:
           '''
           if 'com.ryanheise.audioservice.AudioService' not in manifest:
               manifest = manifest.replace('</application>', service + '    </application>', 1)
-          if 'com.ryanheise.audioservice.AudioService' not in manifest or 'com.ryanheise.audioservice.MediaButtonReceiver' not in manifest:
-              raise SystemExit('Failed to configure audio_service media notification components')
+          if 'com.ryanheise.audioservice.AudioService' in manifest or 'com.ryanheise.audioservice.MediaButtonReceiver' in manifest:
+              raise SystemExit('Legacy audio_service components conflict with Media3 notification ownership')
           path.write_text(manifest)
           import xml.etree.ElementTree as ET
           ET.parse(path)
@@ -395,7 +395,7 @@ jobs:
           for permission in permissions:
               if permission not in saved:
                   raise SystemExit('Missing media permission after manifest update: ' + permission)
-          print('Configured and validated foreground media playback service, media buttons, and Android notification permissions.')
+          print('Configured and validated Media3 foreground playback permissions without legacy service conflicts.')
           PY
       - name: Wire Flutter to the native Media3 playback service
         shell: bash
@@ -725,24 +725,19 @@ jobs:
                   raise SystemExit('AndroidManifest.xml has no application element')
               text = text.replace('<application', element + '\n    <application', 1)
           text = text.replace('android:label="samirnet_player"', 'android:label="SM Player"')
-          service = '''        <service
-                      android:name="com.ryanheise.audioservice.AudioService"
-                      android:foregroundServiceType="mediaPlayback"
-                      android:exported="true"
-                      android:stopWithTask="false">
-                      <intent-filter>
-                          <action android:name="android.media.browse.MediaBrowserService" />
-                      </intent-filter>
-                  </service>
-                  <receiver
-                      android:name="com.ryanheise.audioservice.MediaButtonReceiver"
-                      android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MEDIA_BUTTON" />
-                      </intent-filter>
-                  </receiver>'''
-          if 'com.ryanheise.audioservice.AudioService' not in text:
-              text = text.replace('</application>', service + '\n    </application>', 1)
+          # Media3 is the sole owner of playback notifications and media buttons.
+          # Do not register the legacy audio_service Android service alongside it.
+          import re
+          text = re.sub(
+              r'\s*<service\b(?=[^>]*android:name="com\.ryanheise\.audioservice\.AudioService")[\s\S]*?</service>',
+              '',
+              text,
+          )
+          text = re.sub(
+              r'\s*<receiver\b(?=[^>]*android:name="com\.ryanheise\.audioservice\.MediaButtonReceiver")[\s\S]*?</receiver>',
+              '',
+              text,
+          )
           path.write_text(text)
           import xml.etree.ElementTree as ET
           ET.parse(path)
