@@ -541,6 +541,7 @@ jobs:
               override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
 
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  val startResult = super.onStartCommand(intent, flags, startId)
                   when (intent?.getStringExtra(EXTRA_ACTION)) {
                       ACTION_PLAY_QUEUE -> playQueue(intent)
                       ACTION_PLAY -> player.play()
@@ -557,7 +558,7 @@ jobs:
                       ACTION_SET_REPEAT -> player.repeatMode = intent.getIntExtra(EXTRA_REPEAT_MODE, Player.REPEAT_MODE_OFF)
                       ACTION_SET_SHUFFLE -> player.shuffleModeEnabled = intent.getBooleanExtra(EXTRA_SHUFFLE, false)
                   }
-                  return START_NOT_STICKY
+                  return startResult
               }
 
               private fun playQueue(intent: Intent) {
