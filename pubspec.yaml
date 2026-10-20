@@ -36,6 +36,10 @@ dependencies:
   permission_handler: ^11.3.1
   device_info_plus: ^11.5.0
 
+dependency_overrides:
+  # Keep the Android SharedPreferences bridge aligned across clean release builds.
+  shared_preferences_android: 2.4.15
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
