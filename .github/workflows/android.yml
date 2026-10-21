@@ -549,6 +549,7 @@ jobs:
                   "isPlaying" to player.isPlaying,
                   "isReady" to (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_ENDED),
                   "isBuffering" to (player.playbackState == Player.STATE_BUFFERING),
+                  "isEnded" to (player.playbackState == Player.STATE_ENDED),
                   "positionMs" to player.currentPosition.coerceAtLeast(0L),
                   "durationMs" to player.duration.coerceAtLeast(0L),
                   "index" to player.currentMediaItemIndex,
@@ -621,7 +622,7 @@ jobs:
               companion object {
                   @Volatile private var instance: SMPlayerMediaSessionService? = null
                   fun currentState(): Map<String, Any> = instance?.currentStateMap() ?: mapOf(
-                      "isPlaying" to false, "isReady" to false, "isBuffering" to false,
+                      "isPlaying" to false, "isReady" to false, "isBuffering" to false, "isEnded" to false,
                       "positionMs" to 0L, "durationMs" to 0L, "index" to -1,
                       "width" to 0, "height" to 0, "error" to ""
                   )
