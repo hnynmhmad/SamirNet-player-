@@ -506,11 +506,13 @@ jobs:
           import android.content.Intent
           import android.net.Uri
           import android.os.Bundle
+          import android.util.Log
           import androidx.media3.common.AudioAttributes
           import androidx.media3.common.C
           import androidx.media3.common.MediaItem
           import androidx.media3.common.MediaMetadata
           import androidx.media3.common.Player
+          import androidx.media3.common.PlaybackException
           import androidx.media3.exoplayer.ExoPlayer
           import androidx.media3.session.MediaSession
           import androidx.media3.session.MediaSessionService
@@ -521,8 +523,9 @@ jobs:
               private lateinit var mediaSession: MediaSession
 
               override fun onCreate() {
-                  instance = this
                   super.onCreate()
+                  Log.i(TAG, "MediaSessionService created")
+                  instance = this
                   player = ExoPlayer.Builder(this).build().apply {
                       setAudioAttributes(
                           AudioAttributes.Builder()
@@ -532,6 +535,17 @@ jobs:
                           true
                       )
                       setHandleAudioBecomingNoisy(true)
+                      addListener(object : Player.Listener {
+                          override fun onPlaybackStateChanged(playbackState: Int) {
+                              Log.i(TAG, "playbackState=$playbackState isPlaying=$isPlaying itemIndex=$currentMediaItemIndex durationMs=$duration")
+                          }
+                          override fun onIsPlayingChanged(isPlaying: Boolean) {
+                              Log.i(TAG, "isPlaying=$isPlaying playWhenReady=$playWhenReady")
+                          }
+                          override fun onPlayerError(error: PlaybackException) {
+                              Log.e(TAG, "ExoPlayer error: ${error.errorCodeName}: ${error.message}", error)
+                          }
+                      })
                   }
                   mediaSession = MediaSession.Builder(this, player)
                       .setCallback(object : MediaSession.Callback {
@@ -563,8 +577,10 @@ jobs:
               override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
 
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  val action = intent?.getStringExtra(EXTRA_ACTION)
+                  Log.i(TAG, "onStartCommand action=$action startId=$startId")
                   val startResult = super.onStartCommand(intent, flags, startId)
-                  when (intent?.getStringExtra(EXTRA_ACTION)) {
+                  when (action) {
                       ACTION_PLAY_QUEUE -> playQueue(intent)
                       ACTION_PLAY -> player.play()
                       ACTION_PAUSE -> player.pause()
@@ -587,7 +603,15 @@ jobs:
               private fun playQueue(intent: Intent) {
                   val paths = intent.getStringArrayListExtra(EXTRA_PATHS) ?: arrayListOf()
                   val titles = intent.getStringArrayListExtra(EXTRA_TITLES) ?: arrayListOf()
-                  if (paths.isEmpty() || paths.size != titles.size) return
+                  if (paths.isEmpty() || paths.size != titles.size) {
+                      Log.e(TAG, "Refusing invalid media queue: paths=${paths.size} titles=${titles.size}")
+                      return
+                  }
+                  val missing = paths.filterNot { File(it).isFile }
+                  if (missing.isNotEmpty()) {
+                      Log.e(TAG, "Queue contains ${missing.size} missing/unreadable file path(s)")
+                  }
+                  Log.i(TAG, "Preparing media queue size=${paths.size} index=${intent.getIntExtra(EXTRA_INDEX, 0)}")
                   val items = paths.indices.map { index ->
                       val file = File(paths[index])
                       MediaItem.Builder()
@@ -620,6 +644,7 @@ jobs:
               }
 
               companion object {
+                  private const val TAG = "SMPlayerMediaSession"
                   @Volatile private var instance: SMPlayerMediaSessionService? = null
                   fun currentState(): Map<String, Any> = instance?.currentStateMap() ?: mapOf(
                       "isPlaying" to false, "isReady" to false, "isBuffering" to false, "isEnded" to false,
