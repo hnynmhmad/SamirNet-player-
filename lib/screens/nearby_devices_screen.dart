@@ -14,8 +14,9 @@ import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:wifi_iot/wifi_iot.dart';
 import 'package:open_filex/open_filex.dart';
-import 'package:video_player/video_player.dart';
 import 'transfer_media_picker_screen.dart';
+import '../services/media3_video_controller.dart';
+import '../services/media_session_service.dart';
 
 const _nearbyServiceId = 'com.samirnet.snplayer.transfer';
 const _nearbyRed = Color(0xFFEF4444);
@@ -1077,54 +1078,81 @@ class _ReceivedVideoPlayer extends StatefulWidget {
 }
 
 class _ReceivedVideoPlayerState extends State<_ReceivedVideoPlayer> {
-  late final VideoPlayerController _controller;
+  late final Media3VideoController _controller;
   String? _error;
+  bool _ready = false;
+  double? _dragPosition;
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.file(widget.file)
-      ..initialize().then((_) {
-        if (mounted) setState(() {});
-        _controller.play();
-      }).catchError((Object error) {
-        if (mounted) setState(() => _error = 'تعذر تشغيل الفيديو: $error');
-      });
+    final title = widget.file.uri.pathSegments.isEmpty
+        ? widget.file.path.split(Platform.pathSeparator).last
+        : widget.file.uri.pathSegments.last;
+    _controller = Media3VideoController(file: widget.file, title: title);
+    _controller.addListener(_refresh);
+    unawaited(_controller.initialize(
+      queueFiles: [widget.file], queueTitles: [title], initialIndex: 0,
+    ).then((_) {
+      if (mounted) setState(() => _ready = true);
+    }).catchError((Object error) {
+      if (mounted) setState(() => _error = 'تعذر تشغيل الفيديو: $error');
+    }));
   }
+
+  void _refresh() { if (mounted) setState(() {}); }
 
   @override
   void dispose() {
+    _controller.removeListener(_refresh);
     _controller.dispose();
+    unawaited(getBackgroundAudioHandler().then((handler) => handler.stop()).catchError((Object error) {
+      debugPrint('Could not stop received-video Media3 session: $error');
+    }));
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(widget.file.uri.pathSegments.last, maxLines: 1, overflow: TextOverflow.ellipsis)),
-    body: Center(
-      child: _error != null
-        ? Padding(padding: const EdgeInsets.all(20), child: Text(_error!, textAlign: TextAlign.center))
-        : !_controller.value.isInitialized
-          ? const CircularProgressIndicator(color: _nearbyRed)
-          : AspectRatio(
-              aspectRatio: _controller.value.aspectRatio,
-              child: Stack(alignment: Alignment.bottomCenter, children: [
-                VideoPlayer(_controller),
-                VideoProgressIndicator(_controller, allowScrubbing: true, padding: const EdgeInsets.all(12)),
-                Align(
-                  alignment: Alignment.center,
-                  child: IconButton.filled(
-                    iconSize: 36,
-                    onPressed: () => setState(() {
-                      _controller.value.isPlaying ? _controller.pause() : _controller.play();
-                    }),
-                    icon: Icon(_controller.value.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
-                  ),
-                ),
-              ]),
-            ),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final value = _controller.value;
+    final durationMs = value.duration.inMilliseconds <= 0 ? 1 : value.duration.inMilliseconds;
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.file.uri.pathSegments.last, maxLines: 1, overflow: TextOverflow.ellipsis)),
+      body: Center(
+        child: _error != null
+          ? Padding(padding: const EdgeInsets.all(20), child: Text(_error!, textAlign: TextAlign.center))
+          : !_ready || !value.isInitialized
+            ? const CircularProgressIndicator(color: _nearbyRed)
+            : AspectRatio(
+                aspectRatio: value.aspectRatio == 0 ? 16 / 9 : value.aspectRatio,
+                child: Stack(alignment: Alignment.bottomCenter, children: [
+                  const AndroidView(viewType: 'com.samirnet.snplayer/video'),
+                  Positioned(left: 12, right: 12, bottom: 10, child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Slider(
+                      value: (_dragPosition ?? value.position.inMilliseconds.toDouble()).clamp(0, durationMs.toDouble()).toDouble(),
+                      max: durationMs.toDouble(),
+                      onChangeStart: (v) => setState(() => _dragPosition = v),
+                      onChanged: (v) => setState(() => _dragPosition = v),
+                      onChangeEnd: (v) {
+                        unawaited(_controller.seekTo(Duration(milliseconds: v.round())));
+                        setState(() => _dragPosition = null);
+                      },
+                    ),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Text(_formatDuration(value.position), style: const TextStyle(color: Colors.white)),
+                      IconButton.filled(
+                        iconSize: 36,
+                        onPressed: () => unawaited(value.isPlaying ? _controller.pause() : _controller.play()),
+                        icon: Icon(value.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                      ),
+                      Text(_formatDuration(value.duration), style: const TextStyle(color: Colors.white)),
+                    ]),
+                  ])),
+                ]),
+              ),
+      ),
+    );
+  }
 }
 
 String _formatSpeed(double bytesPerSecond) {
