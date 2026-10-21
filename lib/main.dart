@@ -7,7 +7,6 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:video_player/video_player.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:audio_service/audio_service.dart';
@@ -542,6 +541,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       const ListTile(leading: Icon(Icons.play_circle_outline, color: coral), title: Text('التشغيل خارج التطبيق', style: TextStyle(fontWeight: FontWeight.bold)), subtitle: Text('اختر طريقة التشغيل بالخلفية')),
       RadioListTile<String>(value: 'audio', groupValue: backgroundMode, onChanged: (v) async { if (v == null) return; final p = await SharedPreferences.getInstance(); await p.setString('background_mode', v); if (mounted) setState(() => backgroundMode = v); }, title: const Text('الصوت فقط في الخلفية'), subtitle: const Text('إشعار للتحكم بالصوت')),
       RadioListTile<String>(value: 'pip', groupValue: backgroundMode, onChanged: (v) async { if (v == null) return; final p = await SharedPreferences.getInstance(); await p.setString('background_mode', v); if (mounted) setState(() => backgroundMode = v); }, title: const Text('فيديو في نافذة عائمة'), subtitle: const Text('Picture-in-Picture من Android')),
+      RadioListTile<String>(value: 'combined', groupValue: backgroundMode, onChanged: (v) async { if (v == null) return; final p = await SharedPreferences.getInstance(); await p.setString('background_mode', v); if (mounted) setState(() => backgroundMode = v); }, title: const Text('الفيديو العائم مع التشغيل في الخلفية'), subtitle: const Text('نافذة عائمة مع استمرار الصوت وإشعار التحكم')),
     ])),
     const SizedBox(height: 12),
     Card(child: Column(children: [
@@ -1308,8 +1308,97 @@ class PlayerScreen extends StatefulWidget {
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
+class Media3VideoValue {
+  const Media3VideoValue({
+    this.isInitialized = false, this.isPlaying = false, this.isBuffering = false,
+    this.duration = Duration.zero, this.position = Duration.zero, this.size = Size.zero,
+    this.errorDescription,
+  });
+  final bool isInitialized;
+  final bool isPlaying;
+  final bool isBuffering;
+  final Duration duration;
+  final Duration position;
+  final Size size;
+  final String? errorDescription;
+  bool get hasError => errorDescription != null && errorDescription!.isNotEmpty;
+  double get aspectRatio => size.height <= 0 ? 0 : size.width / size.height;
+}
+
+class Media3VideoController extends ChangeNotifier {
+  Media3VideoController({required this.file, required this.title});
+  final File file;
+  final String title;
+  static const MethodChannel _channel = MethodChannel('com.samirnet.snplayer/media3');
+  Media3VideoValue _value = const Media3VideoValue();
+  Timer? _pollTimer;
+  bool _disposed = false;
+  bool _polling = false;
+  Media3VideoValue get value => _value;
+
+  Future<void> initialize({
+    required List<File> queueFiles, required List<String> queueTitles,
+    required int initialIndex, Duration initialPosition = Duration.zero, bool looping = false,
+  }) async {
+    if (queueFiles.isEmpty || queueFiles.length != queueTitles.length) throw ArgumentError('قائمة الفيديوهات فارغة أو غير صالحة');
+    final handler = await getBackgroundAudioHandler();
+    if (handler is! SNBackgroundAudioHandler) throw StateError('خدمة Media3 غير جاهزة');
+    await handler.playQueueInBackground(queueFiles, queueTitles, initialIndex, startPosition: initialPosition);
+    await _channel.invokeMethod<bool>('setRepeatMode', {'mode': looping ? 1 : 0});
+    final deadline = DateTime.now().add(const Duration(seconds: 15));
+    while (!_disposed && DateTime.now().isBefore(deadline)) {
+      await _refresh();
+      if (_value.isInitialized || _value.hasError) break;
+      await Future.delayed(const Duration(milliseconds: 120));
+    }
+    if (_value.hasError) throw StateError(_value.errorDescription!);
+    if (!_value.isInitialized) throw TimeoutException('انتهت مهلة تهيئة محرك Media3 للفيديو');
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 220), (_) => unawaited(_refresh()));
+  }
+
+  Future<void> _refresh() async {
+    if (_disposed || _polling) return;
+    _polling = true;
+    try {
+      final state = await _channel.invokeMapMethod<String, dynamic>('getState');
+      if (state == null || _disposed) return;
+      final durationMs = (state['durationMs'] as num?)?.toInt() ?? 0;
+      final positionMs = (state['positionMs'] as num?)?.toInt() ?? 0;
+      final width = (state['width'] as num?)?.toInt() ?? 0;
+      final height = (state['height'] as num?)?.toInt() ?? 0;
+      final error = (state['error'] as String?)?.trim();
+      _value = Media3VideoValue(
+        isInitialized: state['isReady'] == true, isPlaying: state['isPlaying'] == true,
+        isBuffering: state['isBuffering'] == true,
+        duration: Duration(milliseconds: durationMs < 0 ? 0 : durationMs),
+        position: Duration(milliseconds: positionMs < 0 ? 0 : positionMs),
+        size: Size(width.toDouble(), height.toDouble()),
+        errorDescription: error == null || error.isEmpty ? null : error,
+      );
+      notifyListeners();
+    } catch (error) {
+      debugPrint('Media3 video state refresh failed: $error');
+    } finally {
+      _polling = false;
+    }
+  }
+
+  Future<void> play() async { await _channel.invokeMethod<bool>('play'); await _refresh(); }
+  Future<void> pause() async { await _channel.invokeMethod<bool>('pause'); await _refresh(); }
+  Future<void> seekTo(Duration position) async {
+    await _channel.invokeMethod<bool>('seek', {'positionMs': position.inMilliseconds < 0 ? 0 : position.inMilliseconds});
+    await _refresh();
+  }
+  Future<void> setLooping(bool looping) async { await _channel.invokeMethod<bool>('setRepeatMode', {'mode': looping ? 1 : 0}); await _refresh(); }
+  Future<void> setPlaybackSpeed(double speed) async { await _channel.invokeMethod<bool>('setSpeed', {'speed': speed.clamp(0.5, 2.0)}); }
+  Future<void> setVolume(double volume) async { await _channel.invokeMethod<bool>('setVolume', {'volume': volume.clamp(0.0, 1.0)}); }
+  @override
+  void dispose() { _disposed = true; _pollTimer?.cancel(); super.dispose(); }
+}
+
 class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver {
-  late final VideoPlayerController controller;
+  late final Media3VideoController controller;
   bool ready = false, controls = true, locked = false, fillScreen = false, _longPressActive = false, _backgroundAudioActive = false;
   String? _videoOpenError;
   bool _isFavorite = false, _repeat = false, _shuffle = false;
@@ -1332,16 +1421,14 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   int? _lastBackgroundQueueIndex;
   int? _pendingBackgroundQueueIndex;
   DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
-  DateTime _lastPositionSync = DateTime.fromMillisecondsSinceEpoch(0);
-  bool? _lastVideoPlaying;
-  bool _syncingBackgroundAudio = false;
   bool _backgroundAudioStarting = false;
+  bool _allowPop = false;
+  double? _videoDragPosition;
+  bool _showTotalDuration = false;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Warm up the Android media session while the Activity is foregrounded. This
-    // avoids waiting until the app is already backgrounded to create the service.
     unawaited(_prepareBackgroundAudioHandler());
     _isFavorite = widget.favorite;
     _loadVideoModes();
@@ -1349,164 +1436,68 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (_playlistIndex < 0) _playlistIndex = 0;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight, DeviceOrientation.portraitUp]);
-    controller = VideoPlayerController.file(widget.file);
-    controller.initialize().then((_) async {
-      // Start visible playback immediately after the decoder is ready. Preference
-      // reads and media-session setup must never hold the video behind a spinner.
-      await controller.play();
-      if (mounted) setState(() { ready = true; _videoOpenError = null; });
+    controller = Media3VideoController(file: widget.file, title: widget.entry.name);
+    controller.addListener(_update);
+    unawaited(_initializeVideo());
+  }
+
+  Future<void> _initializeVideo() async {
+    try {
       final prefs = await SharedPreferences.getInstance();
-      // The background-video choice is persistent and app-wide, not per-player.
       _videoBackgroundModeEnabled = prefs.getBool('video_background_enabled_v1') ?? false;
-      final resume = prefs.getInt('resume_${widget.entry.id}') ?? 0;
-      if (resume > 0 && resume < controller.value.duration.inMilliseconds - 3000) {
-        await controller.seekTo(Duration(milliseconds: resume));
+      final resumeMs = prefs.getInt('resume_${widget.entry.id}') ?? 0;
+      final queueEntries = <MediaEntry>[];
+      final queueFiles = <File>[];
+      final queueTitles = <String>[];
+      for (final entry in widget.playlist) {
+        final file = entry.id == widget.entry.id ? widget.file : await entry.asset.file;
+        if (file == null) continue;
+        queueEntries.add(entry);
+        queueFiles.add(file);
+        queueTitles.add(entry.name);
       }
-      final modePrefs = await SharedPreferences.getInstance();
-      await controller.setLooping(modePrefs.getBool('video_repeat_v1') ?? false);
-
-      // Video playback already started above; notification/session setup is optional.
-      // If the media-session plugin fails, keep the visible video running.
-      final AudioHandler handler;
-      try {
-        handler = await getBackgroundAudioHandler();
-      } catch (error, stack) {
-        debugPrint('Media session unavailable; continuing foreground video playback: $error\\n$stack');
-        if (mounted) {
-          setState(() { ready = controller.value.isInitialized; _videoOpenError = null; });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('يعمل الفيديو، لكن تعذّر تفعيل إشعار التحكم بالوسائط.')),
-          );
-        }
-        _scheduleHide();
-        return;
+      var startIndex = queueEntries.indexWhere((entry) => entry.id == widget.entry.id);
+      if (startIndex < 0) {
+        queueEntries.add(widget.entry);
+        queueFiles.add(widget.file);
+        queueTitles.add(widget.entry.name);
+        startIndex = queueEntries.length - 1;
       }
-
-      // If a notification skip changed the active video, attach this screen to the
-      // existing media session rather than starting a second audible playback.
-      final activeItem = handler.mediaItem.value;
-      if (_videoBackgroundModeEnabled &&
-          handler is SNBackgroundAudioHandler &&
-          handler.queue.value.any((item) => item.id == widget.file.path)) {
-        // Keep background mode active across manual and notification-driven
-        // navigation, even if the previous video was paused.
-        if (activeItem?.id != widget.file.path) {
-          await handler.selectQueueItemByPath(widget.file.path);
-        }
-        final currentState = handler.playbackState.value;
-        final currentItem = handler.mediaItem.value;
-        if (currentItem?.id == widget.file.path) {
-          _foregroundHandler = handler;
-          await controller.setVolume(0.0);
-          if (currentState.position > Duration.zero) {
-            await controller.seekTo(currentState.position);
-          }
-          if (currentState.playing) {
-            await controller.play();
-          } else {
-            await controller.pause();
-          }
-          await _loadBackgroundQueueEntries(handler);
-          _lastBackgroundQueueIndex = currentState.queueIndex;
-          if (mounted) {
-            setState(() {
-              ready = true;
-              _backgroundAudioActive = true;
-              _lastVideoPlaying = currentState.playing;
-            });
-          }
-          _attachBackgroundPlaybackListener(handler);
-        } else {
-          await controller.play();
-          _foregroundHandler = handler;
-          _foregroundHandler!.bindForegroundVideo(
-            controller,
-            id: widget.file.path,
-            title: widget.entry.name,
-          );
-          if (mounted) setState(() => ready = true);
-          unawaited(_prepareVideoBackgroundQueue(handler));
-        }
-      } else {
-        await controller.play();
-        _foregroundHandler = handler as SNBackgroundAudioHandler;
-        _foregroundHandler!.bindForegroundVideo(
-          controller,
-          id: widget.file.path,
-          title: widget.entry.name,
-        );
-        if (mounted) setState(() => ready = true);
-        unawaited(_prepareVideoBackgroundQueue(handler));
-      }
-      // Apply a previously enabled background mode to every newly opened video.
-      if (_videoBackgroundModeEnabled && !_backgroundAudioActive) {
-        await _startBackgroundAudio(showFeedback: false);
-      }
-      _scheduleHide();
-    }).catchError((Object error, StackTrace stack) async {
-      // Session/notification setup is optional: an error there must not disable
-      // the actual video player after the file controller has initialized.
-      debugPrint('Video player/session initialization reported an error: $error\\n$stack');
-      try {
-        if (controller.value.isInitialized && !controller.value.isPlaying) {
-          await controller.play();
-        }
-      } catch (playError) {
-        debugPrint('Foreground video fallback playback failed: $playError');
+      _backgroundQueueEntries = queueEntries;
+      _lastBackgroundQueueIndex = startIndex;
+      await controller.initialize(
+        queueFiles: queueFiles,
+        queueTitles: queueTitles,
+        initialIndex: startIndex,
+        initialPosition: Duration(milliseconds: resumeMs < 0 ? 0 : resumeMs),
+        looping: prefs.getBool('video_repeat_v1') ?? false,
+      );
+      final handler = await getBackgroundAudioHandler();
+      if (handler is SNBackgroundAudioHandler) {
+        _foregroundHandler = handler;
+        _attachBackgroundPlaybackListener(handler);
       }
       if (mounted) {
         setState(() {
           ready = controller.value.isInitialized;
-          _videoOpenError = controller.value.isInitialized ? null : 'تعذر فتح الفيديو: $error';
+          _backgroundAudioActive = _videoBackgroundModeEnabled;
+          _videoOpenError = controller.value.errorDescription;
         });
-        if (controller.value.isInitialized) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('تعذر تفعيل بعض أدوات التحكم؛ تمت محاولة تشغيل الفيديو مباشرة.')),
-          );
-        }
       }
       _scheduleHide();
-    });
-    controller.addListener(_update);
+    } catch (error, stack) {
+      debugPrint('Media3 video initialization failed: $error\\n$stack');
+      if (mounted) {
+        setState(() {
+          ready = controller.value.isInitialized;
+          _videoOpenError = controller.value.errorDescription ?? 'تعذر فتح الفيديو: $error';
+        });
+      }
+    }
   }
+
   void _update() {
     if (!mounted) return;
-    if (!_backgroundAudioActive) {
-      _foregroundHandler?.syncForegroundVideoState();
-    }
-    if (_backgroundAudioActive && !_syncingBackgroundAudio && controller.value.isInitialized) {
-      // While the player is visible, keep the background audio clock aligned
-      // with the actual video controller. In background, Media3 remains master.
-      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
-          DateTime.now().difference(_lastPositionSync).inMilliseconds >= 500) {
-        final handler = _foregroundHandler;
-        if (handler != null) {
-          final delta = (handler.playbackState.value.position - controller.value.position).inMilliseconds.abs();
-          if (delta > 700) {
-            _lastPositionSync = DateTime.now();
-            _syncingBackgroundAudio = true;
-            unawaited(handler.seek(controller.value.position).catchError((Object error) {
-              debugPrint('Foreground-to-background position synchronization failed: $error');
-            }).whenComplete(() { _syncingBackgroundAudio = false; }));
-          }
-        }
-      }
-      final playing = controller.value.isPlaying;
-      if (_lastVideoPlaying != playing) {
-        _lastVideoPlaying = playing;
-        _syncingBackgroundAudio = true;
-        getBackgroundAudioHandler().then((handler) async {
-          if (playing) {
-            await handler.seek(controller.value.position);
-            await handler.play();
-          } else {
-            await handler.pause();
-          }
-        }).catchError((Object error) {
-          debugPrint('Background playback synchronization failed: $error');
-        }).whenComplete(() { _syncingBackgroundAudio = false; });
-      }
-    }
     if (controller.value.isInitialized && DateTime.now().difference(_lastSaved).inSeconds >= 5) {
       _lastSaved = DateTime.now();
       SharedPreferences.getInstance().then((p) => p.setInt('resume_${widget.entry.id}', controller.value.position.inMilliseconds));
@@ -1633,19 +1624,24 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         }
       }
     }
-    if (state == AppLifecycleState.paused &&
-        _videoBackgroundModeEnabled &&
-        mounted &&
-        controller.value.isInitialized &&
-        controller.value.isPlaying &&
-        !_backgroundAudioActive) {
-      // Start the media session while the video is still playing so Android can
-      // keep audio alive and expose notification controls after Home is pressed.
-      unawaited(_startBackgroundAudio(showFeedback: false));
+    if (state == AppLifecycleState.paused && mounted && controller.value.isPlaying) {
+      SharedPreferences.getInstance().then((prefs) async {
+        final mode = prefs.getString('background_mode') ?? 'audio';
+        if (mode == 'combined' || mode == 'pip') {
+          try {
+            await const MethodChannel('com.samirnet.snplayer/pip').invokeMethod<bool>('enterPip');
+          } catch (error) {
+            debugPrint('Automatic PiP request failed: $error');
+          }
+        } else if (!_videoBackgroundModeEnabled) {
+          final handler = _foregroundHandler;
+          if (handler != null) unawaited(handler.stop());
+        }
+      });
     }
   }
 
-  Future<void> _loadBackgroundQueueEntries(AudioHandler handler) async {
+    Future<void> _loadBackgroundQueueEntries(AudioHandler handler) async {
     final entriesByPath = <String, MediaEntry>{};
     for (final entry in widget.playlist) {
       final file = entry.id == widget.entry.id ? widget.file : await entry.asset.file;
@@ -1658,8 +1654,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   void _attachBackgroundPlaybackListener(AudioHandler handler) {
     _backgroundPlaybackSub?.cancel();
-    _backgroundPlaybackSub = handler.playbackState.listen((state) async {
-      if (!_backgroundAudioActive || !mounted || !controller.value.isInitialized) return;
+    _backgroundPlaybackSub = handler.playbackState.listen((state) {
+      if (!mounted) return;
       final index = state.queueIndex;
       if (index != null && index != _lastBackgroundQueueIndex) {
         _lastBackgroundQueueIndex = index;
@@ -1668,160 +1664,77 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
           if (nextEntry != null && nextEntry.id != widget.entry.id) {
             if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
               widget.onNavigate(nextEntry);
-              return;
+            } else {
+              _pendingBackgroundQueueIndex = index;
             }
-            _pendingBackgroundQueueIndex = index;
           }
-        }
-      }
-      final positionDelta =
-          (state.position - controller.value.position).inMilliseconds.abs();
-      if (positionDelta > 700 && !_syncingBackgroundAudio) {
-        _syncingBackgroundAudio = true;
-        try {
-          // Seeking from the Android notification must move the visible video too.
-          await controller.seekTo(state.position);
-        } finally {
-          _syncingBackgroundAudio = false;
-        }
-      }
-      // The background media session is the source of truth for position.
-      // Guard these mirrored play/pause calls so they are not sent straight back
-      // to the audio handler by the video controller listener.
-      if (state.playing && !controller.value.isPlaying) {
-        _syncingBackgroundAudio = true;
-        try {
-          await controller.play();
-        } finally {
-          _syncingBackgroundAudio = false;
-        }
-      } else if (!state.playing && controller.value.isPlaying) {
-        _syncingBackgroundAudio = true;
-        try {
-          await controller.pause();
-        } finally {
-          _syncingBackgroundAudio = false;
         }
       }
     });
   }
 
   Future<void> _startBackgroundAudio({bool showFeedback = true}) async {
-    // Lifecycle callbacks can fire in quick succession (inactive, hidden, paused).
-    // Do not initialize two media queues or race volume changes.
     if (_backgroundAudioStarting) return;
     _backgroundAudioStarting = true;
-    final resumePosition = controller.value.position;
     try {
       final prefs = await SharedPreferences.getInstance();
       final mode = prefs.getString('background_mode') ?? 'audio';
       if (mode == 'pip') {
         final result = await const MethodChannel('com.samirnet.snplayer/pip').invokeMethod<bool>('enterPip');
-        if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result == true ? 'تم طلب نافذة الفيديو العائمة.' : 'تعذر تشغيل النافذة العائمة؛ تحقق من دعم Picture-in-Picture في Android.')));
+        if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+          result == true ? 'تم طلب نافذة الفيديو العائمة.' : 'تعذر تشغيل النافذة العائمة؛ تحقق من دعم Picture-in-Picture في Android.')));
         return;
       }
-      if (_backgroundAudioActive) {
+      if (_videoBackgroundModeEnabled) {
         _videoBackgroundModeEnabled = false;
         await prefs.setBool('video_background_enabled_v1', false);
-        await _backgroundPlaybackSub?.cancel();
-        _backgroundPlaybackSub = null;
-        final handler = await getBackgroundAudioHandler();
-        await handler.stop();
-        await controller.setVolume(1.0);
-        // Restore the foreground video as the media-session target after ending
-        // the background audio queue, so notification controls remain functional.
-        _foregroundHandler = handler as SNBackgroundAudioHandler;
-        _foregroundHandler!.bindForegroundVideo(
-          controller,
-          id: widget.file.path,
-          title: widget.entry.name,
-        );
-        if (controller.value.isInitialized && !controller.value.isPlaying) {
-          await controller.play();
-        }
-        if (mounted) setState(() { _backgroundAudioActive = false; _lastVideoPlaying = null; });
-        if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم إيقاف صوت الخلفية وإعادة صوت الفيديو.')));
+        if (mounted) setState(() => _backgroundAudioActive = false);
+        if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم إيقاف وضع التشغيل بالخلفية.')));
         return;
       }
-      // Keep the in-app video audible while the second player prepares. Muting it
-      // before setAudioSource completes causes the reported multi-second silence.
-      if (!controller.value.isPlaying) await controller.play();
-      await prefs.setInt('resume_${widget.entry.id}', resumePosition.inMilliseconds);
-      final handler = await getBackgroundAudioHandler();
-      if (handler is! SNBackgroundAudioHandler) {
-        throw StateError('خدمة تشغيل الخلفية غير جاهزة');
-      }
-      _foregroundHandler = handler;
-
-      // Build the same video order into the Android media queue so notification
-      // Previous/Next can change tracks, not merely restart the current video.
-      final queueEntries = <MediaEntry>[];
-      final queueFiles = <File>[];
-      final queueTitles = <String>[];
-      for (final entry in widget.playlist) {
-        final file = entry.id == widget.entry.id ? widget.file : await entry.asset.file;
-        if (file == null) continue;
-        queueEntries.add(entry);
-        queueFiles.add(file);
-        queueTitles.add(entry.name);
-      }
-      var startIndex = queueEntries.indexWhere((entry) => entry.id == widget.entry.id);
-      if (startIndex < 0) {
-        queueEntries.add(widget.entry);
-        queueFiles.add(widget.file);
-        queueTitles.add(widget.entry.name);
-        startIndex = queueEntries.length - 1;
-      }
-      _backgroundQueueEntries = queueEntries;
-      _lastBackgroundQueueIndex = startIndex;
-      _pendingBackgroundQueueIndex = null;
-      await handler.playQueueInBackground(
-        queueFiles,
-        queueTitles,
-        startIndex,
-        startPosition: controller.value.position,
-      );
-      // Do not switch audio sources until the background player confirms that it
-      // actually started. A timeout leaves the original video audio intact.
-      await handler.playbackState
-          .firstWhere((state) => state.playing)
-          .timeout(const Duration(seconds: 10));
-      await controller.setVolume(0.0);
-      debugPrint('SamirNet background audio confirmed playing; video audio muted');
+      // Foreground video and background audio use the same Media3 ExoPlayer.
       _videoBackgroundModeEnabled = true;
       await prefs.setBool('video_background_enabled_v1', true);
-      if (mounted) setState(() { _backgroundAudioActive = true; _lastVideoPlaying = controller.value.isPlaying; });
-      _attachBackgroundPlaybackListener(handler);
-      if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يظهر إشعار التحكم، ويمكنك استخدام السابق والتالي والتقديم والإرجاع.')));
-    } catch (e) {
-      // A failed activation must not leave a stale enabled preference behind.
-      _videoBackgroundModeEnabled = false;
-      try {
-        final failedPrefs = await SharedPreferences.getInstance();
-        await failedPrefs.setBool('video_background_enabled_v1', false);
-      } catch (_) {}
-      try { await controller.setVolume(1.0); } catch (_) {}
-      try {
-        final handler = await getBackgroundAudioHandler();
-        if (handler is SNBackgroundAudioHandler) {
-          await handler.stop();
-          handler.bindForegroundVideo(
-            controller,
-            id: widget.file.path,
-            title: widget.entry.name,
-          );
-          _foregroundHandler = handler;
+      if (mode == 'combined') {
+        try {
+          await const MethodChannel('com.samirnet.snplayer/pip').invokeMethod<bool>('enterPip');
+        } catch (error) {
+          debugPrint('PiP request failed; Media3 background audio remains available: $error');
         }
-      } catch (restoreError) {
-        debugPrint('SamirNet could not restore foreground media session: $restoreError');
       }
-      if (mounted) setState(() => _backgroundAudioActive = false);
-      debugPrint('SamirNet background audio startup failed: $e');
-      if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تشغيل الخلفية: $e')));
+      if (mounted) setState(() => _backgroundAudioActive = true);
+      if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('سيستمر التشغيل عبر جلسة Media3 نفسها، دون تشغيل مشغل صوت ثانٍ.')));
+    } catch (error) {
+      debugPrint('Could not enable Media3 background mode: $error');
+      if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر تفعيل التشغيل بالخلفية: $error')));
     } finally {
       _backgroundAudioStarting = false;
     }
   }
+
+  Future<void> _handleBack() async {
+    final prefs = await SharedPreferences.getInstance();
+    final mode = prefs.getString('background_mode') ?? 'audio';
+    if ((mode == 'combined' || mode == 'pip') && controller.value.isInitialized) {
+      try {
+        final result = await const MethodChannel('com.samirnet.snplayer/pip').invokeMethod<bool>('enterPip');
+        if (result == true) {
+          if (mode == 'combined') {
+            _videoBackgroundModeEnabled = true;
+            await prefs.setBool('video_background_enabled_v1', true);
+            if (mounted) setState(() => _backgroundAudioActive = true);
+          }
+          return;
+        }
+      } catch (error) {
+        debugPrint('PiP on back failed: $error');
+      }
+    }
+    if (!mounted) return;
+    setState(() => _allowPop = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) Navigator.of(context).pop(); });
+  }
+
   Future<void> _toggleFullscreen() async {
     final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
     await SystemChrome.setPreferredOrientations(landscape ? [DeviceOrientation.portraitUp] : [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
@@ -1877,8 +1790,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _hideTimer?.cancel();
     _overlayTimer?.cancel();
     _backgroundPlaybackSub?.cancel();
-    if (!_backgroundAudioActive) {
-      _foregroundHandler?.clearForegroundVideo(controller);
+    if (!_videoBackgroundModeEnabled) {
+      final handler = _foregroundHandler;
+      if (handler != null) unawaited(handler.stop());
     }
     controller.removeListener(_update);
     controller.dispose();
@@ -1888,16 +1802,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
   void _seek(int seconds) {
     final rawTarget = controller.value.position + Duration(seconds: seconds);
-    final target = rawTarget < Duration.zero
-        ? Duration.zero
-        : rawTarget > controller.value.duration
-            ? controller.value.duration
-            : rawTarget;
+    final target = rawTarget < Duration.zero ? Duration.zero : rawTarget > controller.value.duration ? controller.value.duration : rawTarget;
     unawaited(controller.seekTo(target));
-    if (_backgroundAudioActive) {
-      unawaited(getBackgroundAudioHandler().then((handler) => handler.seek(target)).catchError((Object error) {
-        debugPrint('Background seek synchronization failed: $error');
-      }));
+    if (mounted) {
+      setState(() => _levelOverlayText = '${seconds >= 0 ? '+' : '−'}${_time(Duration(seconds: seconds.abs()))}');
+      _overlayTimer?.cancel();
+      _overlayTimer = Timer(const Duration(milliseconds: 900), () { if (mounted) setState(() => _levelOverlayText = null); });
     }
   }
   Future<void> _navigatePlaylist(int direction, {bool randomize = false}) async {
@@ -1967,12 +1877,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     final v = controller.value;
-    return Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTap: () {}, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, onLongPressStart: locked ? null : _beginSpeedBoost, onLongPressEnd: locked ? null : (_) => _endSpeedBoost(), onHorizontalDragStart: locked ? null : _horizontalSeekStart, onHorizontalDragUpdate: locked ? null : _horizontalSeekUpdate, onHorizontalDragEnd: (_) => _gestureStart = null, onVerticalDragStart: locked ? null : _gestureStartAt, onVerticalDragUpdate: locked ? null : _gestureUpdate, onVerticalDragEnd: (_) => _gestureStart = null, child: Stack(alignment: Alignment.center, children: [
-      if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: VideoPlayer(controller))))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: VideoPlayer(controller)))) else if (_videoOpenError != null || v.hasError) Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.error_outline, color: Colors.white70, size: 44), const SizedBox(height: 12), Text(_videoOpenError ?? 'تعذّر تشغيل هذا الملف', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)), const SizedBox(height: 12), FilledButton.icon(onPressed: () { setState(() { _videoOpenError = null; ready = false; }); controller.initialize().then((_) async { await controller.play(); if (mounted) setState(() => ready = true); }).catchError((Object e) { if (mounted) setState(() => _videoOpenError = 'تعذرت إعادة المحاولة: $e'); }); }, icon: const Icon(Icons.refresh), label: const Text('إعادة المحاولة'))]))) else const CircularProgressIndicator(color: coral),
+    final maxMs = v.duration.inMilliseconds <= 0 ? 1 : v.duration.inMilliseconds;
+    return PopScope<bool>(canPop: _allowPop, onPopInvokedWithResult: (didPop, result) { if (!didPop) unawaited(_handleBack()); }, child: Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTap: () {}, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 3 : -3); }, onLongPressStart: locked ? null : _beginSpeedBoost, onLongPressEnd: locked ? null : (_) => _endSpeedBoost(), onHorizontalDragStart: locked ? null : _horizontalSeekStart, onHorizontalDragUpdate: locked ? null : _horizontalSeekUpdate, onHorizontalDragEnd: (_) => _gestureStart = null, onVerticalDragStart: locked ? null : _gestureStartAt, onVerticalDragUpdate: locked ? null : _gestureUpdate, onVerticalDragEnd: (_) => _gestureStart = null, child: Stack(alignment: Alignment.center, children: [
+      if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: AndroidView(viewType: 'com.samirnet.snplayer/video'))))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: AndroidView(viewType: 'com.samirnet.snplayer/video')))) else if (_videoOpenError != null || v.hasError) Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.error_outline, color: Colors.white70, size: 44), const SizedBox(height: 12), Text(_videoOpenError ?? 'تعذّر تشغيل هذا الملف', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)), const SizedBox(height: 12), FilledButton.icon(onPressed: () { setState(() { _videoOpenError = null; ready = false; }); controller.initialize().then((_) async { await controller.play(); if (mounted) setState(() => ready = true); }).catchError((Object e) { if (mounted) setState(() => _videoOpenError = 'تعذرت إعادة المحاولة: $e'); }); }, icon: const Icon(Icons.refresh), label: const Text('إعادة المحاولة'))]))) else const CircularProgressIndicator(color: coral),
       if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),
       if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
         Row(children: [
-          IconButton(onPressed: () => Navigator.pop(context), tooltip: 'رجوع', icon: const Icon(Icons.arrow_back, color: Colors.white)),
+          IconButton(onPressed: _handleBack, tooltip: 'رجوع', icon: const Icon(Icons.arrow_back, color: Colors.white)),
           Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))),
           IconButton(tooltip: (_backgroundAudioActive || _videoBackgroundModeEnabled) ? 'إيقاف وضع الفيديو في الخلفية لكل الفيديوهات' : 'تفعيل وضع الفيديو في الخلفية لكل الفيديوهات', onPressed: _startBackgroundAudio, icon: Icon(Icons.headphones_rounded, color: (_backgroundAudioActive || _videoBackgroundModeEnabled) ? coral : Colors.white)),
           IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)),
@@ -1998,11 +1909,23 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         const Spacer(),
         const Spacer(),
         Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Column(children: [
-          VideoProgressIndicator(controller, allowScrubbing: true, colors: const VideoProgressColors(playedColor: coral, bufferedColor: Colors.white38, backgroundColor: Colors.white24)),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(activeTrackColor: coral, thumbColor: Colors.white, inactiveTrackColor: Colors.white24),
+            child: Slider(
+              value: (_videoDragPosition ?? v.position.inMilliseconds.toDouble()).clamp(0, maxMs.toDouble()).toDouble(),
+              max: maxMs.toDouble(),
+              onChangeStart: (value) => setState(() => _videoDragPosition = value),
+              onChanged: (value) => setState(() => _videoDragPosition = value),
+              onChangeEnd: (value) {
+                unawaited(controller.seekTo(Duration(milliseconds: value.round())));
+                setState(() => _videoDragPosition = null);
+              },
+            ),
+          ),
           Row(children: [
             Text(_time(v.position), style: const TextStyle(color: Colors.white, fontSize: 12)),
             const Spacer(),
-            Text('-${_time(v.duration - v.position)}', style: const TextStyle(color: Colors.white, fontSize: 12)),
+            InkWell(onTap: () => setState(() => _showTotalDuration = !_showTotalDuration), child: Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(_showTotalDuration ? _time(v.duration) : '-${_time(v.duration - v.position)}', style: const TextStyle(color: Colors.white, fontSize: 12)))),
             IconButton(tooltip: 'ملء الشاشة / احتواء', onPressed: () => setState(() => fillScreen = !fillScreen), icon: Icon(fillScreen ? Icons.fit_screen : Icons.fullscreen, color: Colors.white)),
           ]),
           const SizedBox(height: 2),
@@ -2013,7 +1936,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
             ]),
             Row(mainAxisSize: MainAxisSize.min, children: [
               IconButton(tooltip: 'الفيديو السابق', onPressed: () => _navigatePlaylist(-1), icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 34)),
+              IconButton(tooltip: 'إرجاع 3 ثوانٍ', onPressed: () => _seek(-3), icon: const Icon(Icons.replay_rounded, color: Colors.white, size: 28)),
               IconButton(tooltip: 'تشغيل / إيقاف', onPressed: () => v.isPlaying ? controller.pause() : controller.play(), icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white, size: 56)),
+              IconButton(tooltip: 'تقديم 3 ثوانٍ', onPressed: () => _seek(3), icon: const Icon(Icons.forward_rounded, color: Colors.white, size: 28)),
               IconButton(tooltip: 'الفيديو التالي', onPressed: () => _navigatePlaylist(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 34)),
             ]),
             IconButton(tooltip: _isFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة', onPressed: _toggleFavorite, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)),
@@ -2040,7 +1965,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         ),
       ),
       if (locked) Positioned(left: 16, bottom: 32, child: IconButton.filledTonal(onPressed: () { setState(() { locked = false; controls = true; }); SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); }, icon: const Icon(Icons.lock))),
-    ]))));
+    ])))));
   }
 }
 
