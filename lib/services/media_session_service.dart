@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:video_player/video_player.dart';
 
 /// Owns the single Android media session and the playback-control notification.
 /// Initialization can be retried if Android/plugin setup fails during startup.
@@ -28,7 +27,7 @@ Future<void> initializeMediaSession() async {
 
 class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekHandler {
   final AudioPlayer _player = AudioPlayer();
-  VideoPlayerController? _foregroundVideoController;
+  dynamic _foregroundVideoController;
   String? _foregroundVideoId;
   String? _foregroundVideoTitle;
   bool _backgroundQueueActive = false;
@@ -39,7 +38,7 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
   bool? _lastForegroundPlaying;
 
   void bindForegroundVideo(
-    VideoPlayerController controller, {
+    dynamic controller, {
     required String id,
     required String title,
   }) {
@@ -52,7 +51,7 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     syncForegroundVideoState(force: true);
   }
 
-  void clearForegroundVideo(VideoPlayerController controller) {
+  void clearForegroundVideo(dynamic controller) {
     if (!identical(_foregroundVideoController, controller) || _backgroundQueueActive) return;
     _foregroundVideoController = null;
     _foregroundVideoId = null;
