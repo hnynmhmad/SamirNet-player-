@@ -547,7 +547,7 @@ jobs:
 
               fun currentStateMap(): Map<String, Any> = mapOf(
                   "isPlaying" to player.isPlaying,
-                  "isReady" to (player.playbackState != Player.STATE_IDLE),
+                  "isReady" to (player.playbackState == Player.STATE_READY || player.playbackState == Player.STATE_ENDED),
                   "isBuffering" to (player.playbackState == Player.STATE_BUFFERING),
                   "positionMs" to player.currentPosition.coerceAtLeast(0L),
                   "durationMs" to player.duration.coerceAtLeast(0L),
