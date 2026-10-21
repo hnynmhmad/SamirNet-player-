@@ -1562,8 +1562,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       final mode = prefs.getString('background_mode') ?? 'audio';
       if (mode == 'pip') {
         final result = await const MethodChannel('com.samirnet.snplayer/pip').invokeMethod<bool>('enterPip');
-        if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
-          result == true ? 'تم طلب نافذة الفيديو العائمة.' : 'تعذر تشغيل النافذة العائمة؛ تحقق من دعم Picture-in-Picture في Android.')));
+        if (showFeedback && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+            result == true ? 'تم طلب نافذة الفيديو العائمة.' : 'تعذر تشغيل النافذة العائمة؛ تحقق من دعم Picture-in-Picture في Android.')));
+        }
         return;
       }
       if (_videoBackgroundModeEnabled) {
@@ -1686,7 +1688,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     final target = rawTarget < Duration.zero ? Duration.zero : rawTarget > controller.value.duration ? controller.value.duration : rawTarget;
     unawaited(controller.seekTo(target));
     if (mounted) {
-      setState(() => _levelOverlayText = '${seconds >= 0 ? '+' : '−'}${_time(Duration(seconds: seconds.abs()))}');
+      setState(() {
+        _levelOverlayIcon = seconds >= 0 ? Icons.fast_forward_rounded : Icons.replay_rounded;
+        _levelOverlayText = '${seconds >= 0 ? '+' : '−'}${_time(Duration(seconds: seconds.abs()))}';
+      });
       _overlayTimer?.cancel();
       _overlayTimer = Timer(const Duration(milliseconds: 900), () { if (mounted) setState(() => _levelOverlayText = null); });
     }
