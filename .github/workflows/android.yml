@@ -426,6 +426,7 @@ jobs:
           else:
               needle = '\n    }\n}'
               insertion = r'''
+                  flutterEngine.platformViewsController.registry.registerViewFactory("com.samirnet.snplayer/video", SMPlayerVideoViewFactory())
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.samirnet.snplayer/media3")
                       .setMethodCallHandler { call, result ->
                           try {
@@ -449,7 +450,7 @@ jobs:
                                       intent.putExtra(SMPlayerMediaSessionService.EXTRA_POSITION_MS, call.argument<Number>("positionMs")?.toLong() ?: 0L)
                                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
                                   }
-                                  "play", "pause", "stop", "skipNext", "skipPrevious", "seek", "setSpeed", "setRepeatMode", "setShuffle" -> {
+                                  "play", "pause", "stop", "skipNext", "skipPrevious", "seek", "setSpeed", "setRepeatMode", "setShuffle", "setVolume" -> {
                                       val action = when (call.method) {
                                           "play" -> SMPlayerMediaSessionService.ACTION_PLAY
                                           "pause" -> SMPlayerMediaSessionService.ACTION_PAUSE
@@ -459,7 +460,8 @@ jobs:
                                           "seek" -> SMPlayerMediaSessionService.ACTION_SEEK
                                           "setSpeed" -> SMPlayerMediaSessionService.ACTION_SET_SPEED
                                           "setRepeatMode" -> SMPlayerMediaSessionService.ACTION_SET_REPEAT
-                                          else -> SMPlayerMediaSessionService.ACTION_SET_SHUFFLE
+                                          "setShuffle" -> SMPlayerMediaSessionService.ACTION_SET_SHUFFLE
+                                          else -> SMPlayerMediaSessionService.ACTION_SET_VOLUME
                                       }
                                       intent.putExtra(SMPlayerMediaSessionService.EXTRA_ACTION, action)
                                       when (call.method) {
@@ -467,6 +469,7 @@ jobs:
                                           "setSpeed" -> intent.putExtra(SMPlayerMediaSessionService.EXTRA_SPEED, (call.argument<Number>("speed")?.toFloat() ?: 1f))
                                           "setRepeatMode" -> intent.putExtra(SMPlayerMediaSessionService.EXTRA_REPEAT_MODE, call.argument<Int>("mode") ?: 0)
                                           "setShuffle" -> intent.putExtra(SMPlayerMediaSessionService.EXTRA_SHUFFLE, call.argument<Boolean>("enabled") ?: false)
+                                          "setVolume" -> intent.putExtra(SMPlayerMediaSessionService.EXTRA_VOLUME, call.argument<Number>("volume")?.toFloat() ?: 1f)
                                       }
                                       startService(intent)
                                   }
@@ -544,10 +547,17 @@ jobs:
 
               fun currentStateMap(): Map<String, Any> = mapOf(
                   "isPlaying" to player.isPlaying,
+                  "isReady" to (player.playbackState != Player.STATE_IDLE),
+                  "isBuffering" to (player.playbackState == Player.STATE_BUFFERING),
                   "positionMs" to player.currentPosition.coerceAtLeast(0L),
                   "durationMs" to player.duration.coerceAtLeast(0L),
-                  "index" to player.currentMediaItemIndex
+                  "index" to player.currentMediaItemIndex,
+                  "width" to player.videoSize.width,
+                  "height" to player.videoSize.height,
+                  "error" to (player.playerError?.message ?: "")
               )
+
+              private fun playerForViewOrNull(): ExoPlayer? = if (::player.isInitialized) player else null
 
               override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
 
@@ -568,6 +578,7 @@ jobs:
                       ACTION_SET_SPEED -> player.setPlaybackSpeed(intent.getFloatExtra(EXTRA_SPEED, 1f).coerceIn(0.5f, 2f))
                       ACTION_SET_REPEAT -> player.repeatMode = intent.getIntExtra(EXTRA_REPEAT_MODE, Player.REPEAT_MODE_OFF)
                       ACTION_SET_SHUFFLE -> player.shuffleModeEnabled = intent.getBooleanExtra(EXTRA_SHUFFLE, false)
+                      ACTION_SET_VOLUME -> player.volume = intent.getFloatExtra(EXTRA_VOLUME, 1f).coerceIn(0f, 1f)
                   }
                   return startResult
               }
@@ -610,8 +621,11 @@ jobs:
               companion object {
                   @Volatile private var instance: SMPlayerMediaSessionService? = null
                   fun currentState(): Map<String, Any> = instance?.currentStateMap() ?: mapOf(
-                      "isPlaying" to false, "positionMs" to 0L, "durationMs" to 0L, "index" to -1
+                      "isPlaying" to false, "isReady" to false, "isBuffering" to false,
+                      "positionMs" to 0L, "durationMs" to 0L, "index" to -1,
+                      "width" to 0, "height" to 0, "error" to ""
                   )
+                  fun currentPlayer(): ExoPlayer? = instance?.playerForViewOrNull()
                   const val EXTRA_ACTION = "smplayer.action"
                   const val EXTRA_PATHS = "smplayer.paths"
                   const val EXTRA_TITLES = "smplayer.titles"
@@ -620,6 +634,7 @@ jobs:
                   const val EXTRA_SPEED = "smplayer.speed"
                   const val EXTRA_REPEAT_MODE = "smplayer.repeatMode"
                   const val EXTRA_SHUFFLE = "smplayer.shuffle"
+                  const val EXTRA_VOLUME = "smplayer.volume"
                   const val ACTION_PLAY_QUEUE = "playQueue"
                   const val ACTION_PLAY = "play"
                   const val ACTION_PAUSE = "pause"
@@ -630,7 +645,43 @@ jobs:
                   const val ACTION_SET_SPEED = "setSpeed"
                   const val ACTION_SET_REPEAT = "setRepeatMode"
                   const val ACTION_SET_SHUFFLE = "setShuffle"
+                  const val ACTION_SET_VOLUME = "setVolume"
               }
+          }
+          '''.replace('          ', ''))
+
+
+          video_view_path = kotlin_root / 'SMPlayerVideoPlatformView.kt'
+          video_view_path.write_text(r'''package com.samirnet.snplayer
+
+          import android.content.Context
+          import android.view.View
+          import androidx.media3.exoplayer.ExoPlayer
+          import androidx.media3.ui.AspectRatioFrameLayout
+          import androidx.media3.ui.PlayerView
+          import io.flutter.plugin.common.StandardMessageCodec
+          import io.flutter.plugin.platform.PlatformView
+          import io.flutter.plugin.platform.PlatformViewFactory
+
+          class SMPlayerVideoViewFactory : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+              override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
+                  val player = SMPlayerMediaSessionService.currentPlayer()
+                      ?: throw IllegalStateException("Media3 player must be initialized before creating its video view")
+                  return SMPlayerVideoPlatformView(context, player)
+              }
+          }
+
+          private class SMPlayerVideoPlatformView(
+              context: Context,
+              player: ExoPlayer
+          ) : PlatformView {
+              private val playerView = PlayerView(context).apply {
+                  this.player = player
+                  useController = false
+                  resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+              }
+              override fun getView(): View = playerView
+              override fun dispose() { playerView.player = null }
           }
           '''.replace('          ', ''))
 
@@ -641,6 +692,7 @@ jobs:
           text = gradle.read_text()
           dependencies = [
               'androidx.media3:media3-exoplayer:1.8.0',
+              'androidx.media3:media3-ui:1.8.0',
               'androidx.media3:media3-session:1.8.0',
           ]
           if gradle.suffix == '.kts':
