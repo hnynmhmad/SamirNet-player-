@@ -8,13 +8,14 @@ import 'media_session_service.dart';
 
 class Media3VideoValue {
   const Media3VideoValue({
-    this.isInitialized = false, this.isPlaying = false, this.isBuffering = false,
+    this.isInitialized = false, this.isPlaying = false, this.isBuffering = false, this.isEnded = false,
     this.duration = Duration.zero, this.position = Duration.zero, this.size = Size.zero,
     this.errorDescription,
   });
   final bool isInitialized;
   final bool isPlaying;
   final bool isBuffering;
+  final bool isEnded;
   final Duration duration;
   final Duration position;
   final Size size;
@@ -68,7 +69,7 @@ class Media3VideoController extends ChangeNotifier {
       final error = (state['error'] as String?)?.trim();
       _value = Media3VideoValue(
         isInitialized: state['isReady'] == true, isPlaying: state['isPlaying'] == true,
-        isBuffering: state['isBuffering'] == true,
+        isBuffering: state['isBuffering'] == true, isEnded: state['isEnded'] == true,
         duration: Duration(milliseconds: durationMs < 0 ? 0 : durationMs),
         position: Duration(milliseconds: positionMs < 0 ? 0 : positionMs),
         size: Size(width.toDouble(), height.toDouble()),
