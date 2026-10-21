@@ -1,5 +1,5 @@
 name: samirnet_player
-description: SamirNet Player - Arabic-first local media player for Android.
+description: SM Player - Arabic-first local media player for Android.
 publish_to: "none"
 version: 0.1.0+1
 
@@ -15,6 +15,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   photo_manager: ^3.12.0
   video_player: ^2.10.0
+  open_filex: ^4.7.0
   shared_preferences: ^2.5.3
   crypto: ^3.0.6
   encrypt: ^5.0.3
@@ -27,6 +28,17 @@ dependencies:
   share_plus: ^10.1.4
   audio_service: ^0.18.18
   just_audio: ^0.10.4
+  camera: ^0.11.2+1
+  google_mlkit_barcode_scanning: ^0.14.1
+  qr_flutter: ^4.1.0
+  nearby_connections: ^4.3.0
+  wifi_iot: ^0.4.0
+  permission_handler: ^11.3.1
+  device_info_plus: ^11.5.0
+
+dependency_overrides:
+  # Keep the Android SharedPreferences bridge aligned across clean release builds.
+  shared_preferences_android: 2.4.15
 
 dev_dependencies:
   flutter_test:

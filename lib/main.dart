@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'package:file_picker/file_picker.dart';
@@ -12,6 +13,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
+import 'screens/nearby_devices_screen.dart';
+import 'screens/transfer_media_picker_screen.dart';
 import 'services/vault_service.dart';
 import 'services/wifi_transfer_service.dart';
 import 'services/media_session_service.dart';
@@ -47,34 +50,38 @@ class _SamirNetAppState extends State<SamirNetApp> {
   void initState() {
     super.initState();
     _load();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_requestNotificationPermission());
-    });
   }
 
-  Future<void> _requestNotificationPermission() async {
-    if (!Platform.isAndroid) return;
+  Future<void> _load() async {
     try {
-      // This native channel is installed by the Android build workflow and
-      // requests POST_NOTIFICATIONS from the actual Android Activity.
-      final granted = await const MethodChannel(
-        'com.samirnet.snplayer/notifications',
-      ).invokeMethod<bool>('requestPermission');
-      debugPrint('Notification permission granted: $granted');
+      final p = await SharedPreferences.getInstance();
+      final saved = p.getString('theme') ?? 'light';
+      final restoredMode = switch (saved) {
+        'dark' => ThemeMode.dark,
+        'system' => ThemeMode.system,
+        _ => ThemeMode.light,
+      };
+      if (!mounted) return;
+      setState(() => mode = restoredMode);
     } catch (error, stack) {
-      debugPrint('Notification permission request failed: $error\\n$stack');
+      debugPrint('Unable to restore saved theme: $error\\n$stack');
     }
   }
-  Future<void> _load() async {
-    final p = await SharedPreferences.getInstance();
-    final v = p.getString('theme') ?? 'light';
-    if (!mounted) return;
-    setState(() => mode = v == 'dark' ? ThemeMode.dark : ThemeMode.light);
-  }
+
   Future<void> _setMode(ThemeMode value) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString('theme', value == ThemeMode.dark ? 'dark' : value == ThemeMode.light ? 'light' : 'system');
+    // Apply immediately so the visible screen changes before disk persistence.
     if (mounted) setState(() => mode = value);
+    try {
+      final p = await SharedPreferences.getInstance();
+      final saved = switch (value) {
+        ThemeMode.dark => 'dark',
+        ThemeMode.system => 'system',
+        ThemeMode.light => 'light',
+      };
+      await p.setString('theme', saved);
+    } catch (error, stack) {
+      debugPrint('Unable to save selected theme: $error\\n$stack');
+    }
   }
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -147,32 +154,76 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
   }
   Future<void> _requestFirstRunPermissions() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool('first_run_notifications_requested_v2') != true) {
-      var permissionGranted = !Platform.isAndroid;
+    // Check actual Android permission state every launch. Preferences from an
+    // older build must not suppress a required permission prompt after the
+    // user revoked access in system settings.
+    if (Platform.isAndroid) {
       try {
-        permissionGranted = await const MethodChannel('com.samirnet.snplayer/notifications')
-                .invokeMethod<bool>('requestPermission') ??
-            false;
+        await const MethodChannel('com.samirnet.snplayer/notifications')
+            .invokeMethod<bool>('requestPermission');
       } catch (error) {
         debugPrint('Notification permission request failed: $error');
       }
-      // Do not mark the request complete when Android reports denial. This lets
-      // the app retry on a later launch instead of silently suppressing the prompt.
-      if (permissionGranted) {
-        await prefs.setBool('first_run_notifications_requested_v2', true);
+
+      try {
+        final videos = await PhotoManager.requestPermissionExtend(
+          requestOption: const PermissionRequestOption(
+            androidPermission: AndroidPermission(
+              type: RequestType.video,
+              mediaLocation: false,
+            ),
+          ),
+        );
+        if (!videos.isAuth && !videos.hasAccess) {
+          debugPrint('Video media permission not granted: $videos');
+        }
+
+        final audio = await PhotoManager.requestPermissionExtend(
+          requestOption: const PermissionRequestOption(
+            androidPermission: AndroidPermission(
+              type: RequestType.audio,
+              mediaLocation: false,
+            ),
+          ),
+        );
+        if (!audio.isAuth && !audio.hasAccess) {
+          debugPrint('Audio media permission not granted: $audio');
+        }
+      } catch (error) {
+        debugPrint('Media permission request failed: $error');
+      }
+
+      try {
+        var camera = await Permission.camera.status;
+        if (!camera.isGranted) camera = await Permission.camera.request();
+        if (!camera.isGranted) {
+          debugPrint('Camera permission not granted: $camera');
+        }
+      } catch (error) {
+        debugPrint('Camera permission request failed: $error');
       }
     }
-    // Do not open Android's All files access Settings automatically here.
-    // That external screen can interrupt the notification permission dialog.
-    // Storage/media permissions are requested by the relevant library screen.
   }
   @override
   void dispose() { search.dispose(); super.dispose(); }
   Future<void> _loadLocal() async {
-    final p = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() { favorites = (p.getStringList('favorites') ?? []).toSet(); history = p.getStringList('history') ?? []; backgroundMode = p.getString('background_mode') ?? 'audio'; videoSort = p.getString('video_sort') ?? 'dateDesc'; grid = p.getBool('global_media_grid') ?? p.getBool('video_grid') ?? true; foldersGrid = p.getBool('global_media_grid') ?? p.getBool('folders_grid') ?? false; newMediaIds = (p.getStringList('new_media_ids') ?? []).toSet(); seenFolderPaths = (p.getStringList('seen_folder_paths') ?? []).toSet(); });
+    try {
+      final p = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        favorites = (p.getStringList('favorites') ?? []).toSet();
+        history = p.getStringList('history') ?? [];
+        backgroundMode = p.getString('background_mode') ?? 'audio';
+        videoSort = p.getString('video_sort') ?? 'dateDesc';
+        grid = p.getBool('global_media_grid') ?? p.getBool('video_grid') ?? true;
+        foldersGrid = p.getBool('global_media_grid') ?? p.getBool('folders_grid') ?? false;
+        newMediaIds = (p.getStringList('new_media_ids') ?? []).toSet();
+        seenFolderPaths = (p.getStringList('seen_folder_paths') ?? []).toSet();
+      });
+    } catch (error, stack) {
+      // Local preferences are optional; the media library must remain usable.
+      debugPrint('Could not load local preferences: $error\\n$stack');
+    }
   }
   Future<void> _openPermissionSettings() async {
     try {
@@ -198,15 +249,29 @@ class _LibraryScreenState extends State<LibraryScreen> {
           assets.addAll(await all.getAssetListRange(start: start, end: (start + 200).clamp(0, total).toInt()));
         }
       }
-      final prefs = await SharedPreferences.getInstance();
-      final previousIds = (prefs.getStringList('known_media_ids') ?? []).toSet();
-      final currentIds = assets.map((asset) => asset.id).toSet();
-      final discovered = previousIds.isEmpty ? <String>{} : currentIds.difference(previousIds);
-      final retainedNew = (prefs.getStringList('new_media_ids') ?? []).toSet().intersection(currentIds);
-      retainedNew.addAll(discovered);
-      await prefs.setStringList('known_media_ids', currentIds.toList());
-      await prefs.setStringList('new_media_ids', retainedNew.toList());
-      if (mounted) setState(() { videos = assets.map(MediaEntry.new).toList(); newMediaIds = retainedNew; loading = false; denied = false; scanError = null; });
+      // Publish media results before touching preferences. A SharedPreferences
+      // platform-channel failure must never make a valid media scan look empty.
+      if (mounted) {
+        setState(() {
+          videos = assets.map(MediaEntry.new).toList();
+          loading = false;
+          denied = false;
+          scanError = null;
+        });
+      }
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final previousIds = (prefs.getStringList('known_media_ids') ?? []).toSet();
+        final currentIds = assets.map((asset) => asset.id).toSet();
+        final discovered = previousIds.isEmpty ? <String>{} : currentIds.difference(previousIds);
+        final retainedNew = (prefs.getStringList('new_media_ids') ?? []).toSet().intersection(currentIds);
+        retainedNew.addAll(discovered);
+        await prefs.setStringList('known_media_ids', currentIds.toList());
+        await prefs.setStringList('new_media_ids', retainedNew.toList());
+        if (mounted) setState(() => newMediaIds = retainedNew);
+      } catch (prefsError, prefsStack) {
+        debugPrint('Media loaded, but optional preference bookkeeping failed: $prefsError\\n$prefsStack');
+      }
     } catch (error, stack) {
       debugPrint('SamirNet media scan failed: $error\\n$stack');
       if (mounted) setState(() { loading = false; denied = false; scanError = 'تعذر فحص مكتبة الفيديوهات: $error'; });
@@ -227,11 +292,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final p = await SharedPreferences.getInstance(); await p.setStringList('favorites', favorites.toList());
   }
   Future<void> _play(MediaEntry v) async {
+    // Persisting history is best-effort only: a preferences/plugin error must
+    // never prevent the user from opening a video.
     newMediaIds.remove(v.id);
-    final p = await SharedPreferences.getInstance();
-    await p.setStringList('new_media_ids', newMediaIds.toList());
-    history.remove(v.id); history.insert(0, v.id); history = history.take(100).toList();
-    await p.setStringList('history', history);
+    history.remove(v.id);
+    history.insert(0, v.id);
+    history = history.take(100).toList();
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setStringList('new_media_ids', newMediaIds.toList());
+      await p.setStringList('history', history);
+    } catch (error, stack) {
+      debugPrint('Could not persist video history; continuing playback: $error\\n$stack');
+    }
     if (!mounted) return;
     await _openPlayer(v, replace: false);
     if (mounted) setState(() {});
@@ -242,14 +315,81 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final page = MaterialPageRoute(builder: (_) => PlayerScreen(entry: v, file: file, favorite: favorites.contains(v.id), playlist: _sortEntries(videos, videoSort), onFavorite: () => _favorite(v), onNavigate: (next) => _openPlayer(next, replace: true)));
     if (replace) { await Navigator.pushReplacement(context, page); } else { await Navigator.push(context, page); }
   }
+  Future<void> _reloadSharedViewPreference() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final view = prefs.getBool('global_media_grid') ??
+          prefs.getBool('video_grid') ??
+          true;
+      if (mounted) setState(() { grid = view; foldersGrid = view; });
+    } catch (error, stack) {
+      debugPrint('Could not reload shared grid/list preference: $error\\n$stack');
+    }
+  }
   Future<void> _saveViewPreferences() async {
+    // One shared preference is the source of truth for videos, folders and audio.
+    // Keep legacy keys synchronized so older screens migrate cleanly.
     final p = await SharedPreferences.getInstance();
-    await p.setBool('video_grid', grid);
-    await p.setBool('folders_grid', foldersGrid);
     await p.setBool('global_media_grid', grid);
+    await p.setBool('video_grid', grid);
+    await p.setBool('folders_grid', grid);
+    foldersGrid = grid;
     await p.setString('video_sort', videoSort);
   }
   void _toast(String s) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+  Future<void> _openTransferChooser() async {
+    final receiveMode = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('نقل الملفات دون إنترنت', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              const Text('اختر طريقة بدء الاتصال بين الهاتفين. لا يلزم اتصال بالإنترنت.'),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: coral, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
+                  onPressed: () => Navigator.pop(sheetContext, false),
+                  icon: const Icon(Icons.search_rounded),
+                  label: const Text('إرسال ملفات — البحث عن جهاز'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(foregroundColor: coral, padding: const EdgeInsets.symmetric(vertical: 14)),
+                  onPressed: () => Navigator.pop(sheetContext, true),
+                  icon: const Icon(Icons.download_rounded),
+                  label: const Text('استقبال ملفات — إظهار هذا الهاتف'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || receiveMode == null) return;
+    List<File> initialFiles = [];
+    if (!receiveMode) {
+      final picked = await Navigator.push<List<File>>(
+        context,
+        MaterialPageRoute(builder: (_) => const TransferMediaPickerScreen()),
+      );
+      if (!mounted || picked == null || picked.isEmpty) return;
+      initialFiles = picked;
+    }
+    await Navigator.push(context, MaterialPageRoute(
+      builder: (_) => NearbyDevicesScreen(receiveMode: receiveMode, initialFiles: initialFiles),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) => Directionality(textDirection: TextDirection.rtl, child: Scaffold(
     appBar: AppBar(title: const Row(children: [
@@ -270,7 +410,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')),
         PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا')),
       ]),
-      IconButton(tooltip: 'نقل عبر Wi-Fi', onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WifiTransferScreen())), icon: const Icon(Icons.wifi_rounded)),
+      Padding(padding: const EdgeInsetsDirectional.only(start: 6, end: 8), child: IconButton.filled(tooltip: 'نقل الملفات دون إنترنت', style: IconButton.styleFrom(backgroundColor: coral, foregroundColor: Colors.white), onPressed: _openTransferChooser, icon: const Icon(Icons.swap_vert_rounded, size: 28))),
     ]),
     body: tab == 4 ? _settings() : tab == 1 ? _folders() : _library(),
     bottomNavigationBar: NavigationBar(selectedIndex: tab, onDestinationSelected: (v) => setState(() { tab = v; if (v != 0) showAllVideos = false; }), destinations: const [
@@ -300,9 +440,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (tab == 0) ...[
           const SizedBox(height: 4),
           Row(children: [
-            Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () { Navigator.push(context, MaterialPageRoute(builder: (_) => VideosLibraryScreen(entries: videos, initialFavorites: favorites, onPlay: _play, onFavorite: _favorite, onDeleted: _scan))); })),
+            Expanded(child: _homeShortcut(Icons.video_library_rounded, 'الفيديوهات', coral, () async {
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => VideosLibraryScreen(entries: videos, initialFavorites: favorites, onPlay: _play, onFavorite: _favorite, onDeleted: _scan)));
+      await _reloadSharedViewPreference();
+            final p = await SharedPreferences.getInstance();
+            final view = p.getBool('global_media_grid') ?? true;
+            if (mounted) setState(() { grid = view; foldersGrid = view; });
+          })),
             const SizedBox(width: 10),
-            Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AudioLibraryScreen())))),
+            Expanded(child: _homeShortcut(Icons.music_note_rounded, 'الصوتيات', const Color(0xFF3979D5), () async {
+              await Navigator.push(context, MaterialPageRoute(builder: (_) => const AudioLibraryScreen()));
+      await _reloadSharedViewPreference();
+              final prefs = await SharedPreferences.getInstance();
+              final view = prefs.getBool('global_media_grid') ?? true;
+              if (mounted) setState(() { grid = view; foldersGrid = view; });
+            })),
           ]),
           const SizedBox(height: 10),
           Row(children: [
@@ -344,11 +496,22 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
   Future<void> _openFolder(String path, List<MediaEntry> entries) async {
     seenFolderPaths.add(path);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('seen_folder_paths', seenFolderPaths.toList());
+    // Folder navigation must not depend on preferences being available.
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('seen_folder_paths', seenFolderPaths.toList());
+    } catch (error, stack) {
+      debugPrint('Could not persist seen folders; continuing navigation: $error\\n$stack');
+    }
     if (!mounted) return;
     await Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: _folderLabel(path), entries: entries, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)));
-    if (mounted) setState(() {});
+    try {
+      final viewPrefs = await SharedPreferences.getInstance();
+      final view = viewPrefs.getBool('global_media_grid') ?? true;
+      if (mounted) setState(() { grid = view; foldersGrid = view; });
+    } catch (error, stack) {
+      debugPrint('Could not reload shared media view preference: $error\\n$stack');
+    }
   }
   Widget _folders() {
     final groups = <String, List<MediaEntry>>{};
@@ -360,7 +523,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return Column(children: [
       Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 8), child: Row(children: [
         const Expanded(child: Text('المجلدات', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800))),
-        IconButton(tooltip: foldersGrid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () { setState(() => foldersGrid = !foldersGrid); _saveViewPreferences(); }, icon: Icon(foldersGrid ? Icons.view_list : Icons.grid_view)),
       ])),
       Expanded(child: entries.isEmpty ? const Center(child: Text('لا توجد مجلدات فيديو متاحة')) : foldersGrid
         ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.35, crossAxisSpacing: 10, mainAxisSpacing: 10), itemBuilder: (context, i) {
@@ -369,7 +531,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           })
         : ListView.builder(padding: const EdgeInsets.all(12), itemCount: entries.length, itemBuilder: (context, i) {
             final e = entries[i];
-            return Card(child: ListTile(leading: const Icon(Icons.folder_rounded, color: coral), title: Text(_folderLabel(e.key), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(e.value.any((v) => newMediaIds.contains(v.id)) && !seenFolderPaths.contains(e.key) ? 'NEW · ${e.value.length} فيديو' : '${e.value.length} فيديو', style: TextStyle(color: e.value.any((v) => newMediaIds.contains(v.id)) && !seenFolderPaths.contains(e.key) ? coral : null)), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: e.key, entries: e.value, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)))));
+            return Card(child: ListTile(leading: const Icon(Icons.folder_rounded, color: coral), title: Text(_folderLabel(e.key), maxLines: 1, overflow: TextOverflow.ellipsis), subtitle: Text(e.value.any((v) => newMediaIds.contains(v.id)) && !seenFolderPaths.contains(e.key) ? 'NEW · ${e.value.length} فيديو' : '${e.value.length} فيديو', style: TextStyle(color: e.value.any((v) => newMediaIds.contains(v.id)) && !seenFolderPaths.contains(e.key) ? coral : null)), trailing: const Icon(Icons.chevron_left), onTap: () => _openFolder(e.key, e.value)));
           })),
     ]);
   }
@@ -387,10 +549,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
       RadioListTile<ThemeMode>(title: const Text('اتباع مظهر النظام'), value: ThemeMode.system, groupValue: widget.mode, onChanged: (v) { if (v != null) widget.onMode(v); }),
       RadioListTile<ThemeMode>(title: const Text('الوضع الفاتح'), value: ThemeMode.light, groupValue: widget.mode, onChanged: (v) { if (v != null) widget.onMode(v); }),
       RadioListTile<ThemeMode>(title: const Text('الوضع الداكن'), value: ThemeMode.dark, groupValue: widget.mode, onChanged: (v) { if (v != null) widget.onMode(v); }),
-      SwitchListTile(value: grid, onChanged: (v) { setState(() => grid = v); _saveViewPreferences(); }, title: const Text('عرض الشبكة'), subtitle: const Text('إيقاف الخيار يعرض الملفات في قائمة')),
+      SwitchListTile(value: grid, onChanged: (v) { setState(() { grid = v; foldersGrid = v; }); _saveViewPreferences(); }, title: const Text('عرض الشبكة'), subtitle: const Text('إيقاف الخيار يعرض الفيديوهات والمجلدات والموسيقى في قائمة')),
       ListTile(leading: const Icon(Icons.refresh), title: const Text('تحديث مكتبة الوسائط'), onTap: _scan),
       ListTile(leading: const Icon(Icons.lock_outline, color: coral), title: const Text('الخزنة الخاصة'), subtitle: const Text('تشفير ملفاتك وحمايتها برقم سري'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VaultScreen()))),
-      ListTile(leading: const Icon(Icons.wifi, color: coral), title: const Text('نقل عبر Wi-Fi'), subtitle: const Text('استقبال ملفات من جهاز آخر على الشبكة نفسها'), trailing: const Icon(Icons.chevron_left), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WifiTransferScreen()))),
+      ListTile(leading: const CircleAvatar(backgroundColor: coral, child: Icon(Icons.swap_vert_rounded, color: Colors.white)), title: const Text('نقل الملفات دون إنترنت', style: TextStyle(fontWeight: FontWeight.bold)), subtitle: const Text('إرسال واستقبال الملفات مباشرة بين الهاتفين'), trailing: const Icon(Icons.chevron_left), onTap: _openTransferChooser),
     ])),
     const SizedBox(height: 20), const Center(child: Text('SM Player · 0.1.0', style: TextStyle(color: Colors.grey))),
   ]);
@@ -426,6 +588,7 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
     final p = await SharedPreferences.getInstance();
     await p.setString('video_sort', sort);
     await p.setBool('video_grid', grid);
+    await p.setBool('folders_grid', grid);
     await p.setBool('global_media_grid', grid);
   }
   final Set<String> selected = {};
@@ -481,7 +644,6 @@ class _VideosLibraryScreenState extends State<VideosLibraryScreen> {
           final files = items.where((v) => selected.contains(v.id)).toList();
           Navigator.push(context, MaterialPageRoute(builder: (_) => InternalSendScreen(entries: files)));
         }, icon: const Icon(Icons.send_rounded)),
-        IconButton(tooltip: 'تغيير العرض', onPressed: () { setState(() => grid = !grid); _saveViewPrefs(); }, icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
         PopupMenuButton<String>(tooltip: 'ترتيب الفيديوهات', icon: const Icon(Icons.sort), onSelected: (v) { setState(() => sort = v); _saveViewPrefs(); }, itemBuilder: (_) => const [
           PopupMenuItem(value: 'nameAsc', child: Text('الاسم: أ إلى ي')),
           PopupMenuItem(value: 'nameDesc', child: Text('الاسم: ي إلى أ')),
@@ -550,9 +712,25 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
     }
   }
   Future<void> _load() async {
-    final viewPrefs = await SharedPreferences.getInstance();
-    if (mounted) setState(() { grid = viewPrefs.getBool('global_media_grid') ?? true; sort = viewPrefs.getString('video_sort') ?? 'dateDesc'; });
-    if (mounted) setState(() { loading = true; error = null; });
+    // Preferences must not block audio discovery. Some Android installs may
+    // have a stale SharedPreferences platform implementation after an upgrade.
+    try {
+      final viewPrefs = await SharedPreferences.getInstance();
+      if (mounted) {
+        setState(() {
+          grid = viewPrefs.getBool('global_media_grid') ?? true;
+          sort = viewPrefs.getString('video_sort') ?? 'dateDesc';
+        });
+      }
+    } catch (prefsError, prefsStack) {
+      debugPrint('Audio library will load without view preferences: $prefsError\\n$prefsStack');
+    }
+    if (mounted) {
+      setState(() {
+        loading = true;
+        error = null;
+      });
+    }
     try {
       final permission = await PhotoManager.requestPermissionExtend(requestOption: const PermissionRequestOption(androidPermission: AndroidPermission(type: RequestType.audio, mediaLocation: false)));
       if (!permission.isAuth && !permission.hasAccess) {
@@ -636,7 +814,6 @@ class _AudioLibraryScreenState extends State<AudioLibraryScreen> {
     final items = _sortEntries(selectedFolder == null ? audio : (groups[selectedFolder] ?? <MediaEntry>[]), sort);
     return Directionality(textDirection: TextDirection.rtl, child: Scaffold(
       appBar: AppBar(title: Text(selectedFolder == null ? 'الصوتيات' : _folderLabel(selectedFolder!)), actions: [
-        IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () async { final next = !grid; final p = await SharedPreferences.getInstance(); await p.setBool('global_media_grid', next); await p.setBool('video_grid', next); if (mounted) setState(() => grid = next); }, icon: Icon(grid ? Icons.view_list_rounded : Icons.grid_view_rounded)),
         PopupMenuButton<String>(tooltip: 'ترتيب الوسائط', icon: const Icon(Icons.sort), onSelected: (v) async { final p = await SharedPreferences.getInstance(); await p.setString('video_sort', v); if (mounted) setState(() => sort = v); }, itemBuilder: (_) => const [PopupMenuItem(value: 'dateDesc', child: Text('الأحدث أولًا')), PopupMenuItem(value: 'dateAsc', child: Text('الأقدم أولًا')), PopupMenuItem(value: 'nameAsc', child: Text('الاسم: أ إلى ي')), PopupMenuItem(value: 'nameDesc', child: Text('الاسم: ي إلى أ')), PopupMenuItem(value: 'durationDesc', child: Text('المدة: الأطول أولًا')), PopupMenuItem(value: 'durationAsc', child: Text('المدة: الأقصر أولًا'))]),
         IconButton(tooltip: 'تحديث الصوتيات', onPressed: _load, icon: const Icon(Icons.refresh)),
         if (selectedFolder != null) IconButton(tooltip: 'رجوع للمجلدات', onPressed: () => setState(() => selectedFolder = null), icon: const Icon(Icons.folder)),
@@ -1063,8 +1240,9 @@ class _FolderVideosScreenState extends State<FolderVideosScreen> {
   Future<void> _saveViewPrefs() async {
     final p = await SharedPreferences.getInstance();
     await p.setString('video_sort', sort);
-    await p.setBool('video_grid', grid);
     await p.setBool('global_media_grid', grid);
+    await p.setBool('video_grid', grid);
+    await p.setBool('folders_grid', grid);
   }
   List<MediaEntry> get sortedEntries => _sortEntries(widget.entries, sort);
   @override
@@ -1133,6 +1311,7 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver {
   late final VideoPlayerController controller;
   bool ready = false, controls = true, locked = false, fillScreen = false, _longPressActive = false, _backgroundAudioActive = false;
+  String? _videoOpenError;
   bool _isFavorite = false, _repeat = false, _shuffle = false;
   int _playlistIndex = 0;
   Duration _seekStartPosition = Duration.zero;
@@ -1153,6 +1332,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   int? _lastBackgroundQueueIndex;
   int? _pendingBackgroundQueueIndex;
   DateTime _lastSaved = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastPositionSync = DateTime.fromMillisecondsSinceEpoch(0);
   bool? _lastVideoPlaying;
   bool _syncingBackgroundAudio = false;
   bool _backgroundAudioStarting = false;
@@ -1171,7 +1351,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight, DeviceOrientation.portraitUp]);
     controller = VideoPlayerController.file(widget.file);
     controller.initialize().then((_) async {
+      // Start visible playback immediately after the decoder is ready. Preference
+      // reads and media-session setup must never hold the video behind a spinner.
+      await controller.play();
+      if (mounted) setState(() { ready = true; _videoOpenError = null; });
       final prefs = await SharedPreferences.getInstance();
+      // The background-video choice is persistent and app-wide, not per-player.
+      _videoBackgroundModeEnabled = prefs.getBool('video_background_enabled_v1') ?? false;
       final resume = prefs.getInt('resume_${widget.entry.id}') ?? 0;
       if (resume > 0 && resume < controller.value.duration.inMilliseconds - 3000) {
         await controller.seekTo(Duration(milliseconds: resume));
@@ -1179,9 +1365,25 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       final modePrefs = await SharedPreferences.getInstance();
       await controller.setLooping(modePrefs.getBool('video_repeat_v1') ?? false);
 
+      // Video playback already started above; notification/session setup is optional.
+      // If the media-session plugin fails, keep the visible video running.
+      final AudioHandler handler;
+      try {
+        handler = await getBackgroundAudioHandler();
+      } catch (error, stack) {
+        debugPrint('Media session unavailable; continuing foreground video playback: $error\\n$stack');
+        if (mounted) {
+          setState(() { ready = controller.value.isInitialized; _videoOpenError = null; });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('يعمل الفيديو، لكن تعذّر تفعيل إشعار التحكم بالوسائط.')),
+          );
+        }
+        _scheduleHide();
+        return;
+      }
+
       // If a notification skip changed the active video, attach this screen to the
       // existing media session rather than starting a second audible playback.
-      final handler = await getBackgroundAudioHandler();
       final activeItem = handler.mediaItem.value;
       if (_videoBackgroundModeEnabled &&
           handler is SNBackgroundAudioHandler &&
@@ -1194,6 +1396,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         final currentState = handler.playbackState.value;
         final currentItem = handler.mediaItem.value;
         if (currentItem?.id == widget.file.path) {
+          _foregroundHandler = handler;
           await controller.setVolume(0.0);
           if (currentState.position > Duration.zero) {
             await controller.seekTo(currentState.position);
@@ -1235,10 +1438,34 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         if (mounted) setState(() => ready = true);
         unawaited(_prepareVideoBackgroundQueue(handler));
       }
+      // Apply a previously enabled background mode to every newly opened video.
+      if (_videoBackgroundModeEnabled && !_backgroundAudioActive) {
+        await _startBackgroundAudio(showFeedback: false);
+      }
       _scheduleHide();
-    }).catchError((Object error) {
-      if (mounted) setState(() => ready = false);
-      debugPrint('Video player initialization failed: $error');
+    }).catchError((Object error, StackTrace stack) async {
+      // Session/notification setup is optional: an error there must not disable
+      // the actual video player after the file controller has initialized.
+      debugPrint('Video player/session initialization reported an error: $error\\n$stack');
+      try {
+        if (controller.value.isInitialized && !controller.value.isPlaying) {
+          await controller.play();
+        }
+      } catch (playError) {
+        debugPrint('Foreground video fallback playback failed: $playError');
+      }
+      if (mounted) {
+        setState(() {
+          ready = controller.value.isInitialized;
+          _videoOpenError = controller.value.isInitialized ? null : 'تعذر فتح الفيديو: $error';
+        });
+        if (controller.value.isInitialized) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تعذر تفعيل بعض أدوات التحكم؛ تمت محاولة تشغيل الفيديو مباشرة.')),
+          );
+        }
+      }
+      _scheduleHide();
     });
     controller.addListener(_update);
   }
@@ -1248,6 +1475,22 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _foregroundHandler?.syncForegroundVideoState();
     }
     if (_backgroundAudioActive && !_syncingBackgroundAudio && controller.value.isInitialized) {
+      // While the player is visible, keep the background audio clock aligned
+      // with the actual video controller. In background, Media3 remains master.
+      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+          DateTime.now().difference(_lastPositionSync).inMilliseconds >= 500) {
+        final handler = _foregroundHandler;
+        if (handler != null) {
+          final delta = (handler.playbackState.value.position - controller.value.position).inMilliseconds.abs();
+          if (delta > 700) {
+            _lastPositionSync = DateTime.now();
+            _syncingBackgroundAudio = true;
+            unawaited(handler.seek(controller.value.position).catchError((Object error) {
+              debugPrint('Foreground-to-background position synchronization failed: $error');
+            }).whenComplete(() { _syncingBackgroundAudio = false; }));
+          }
+        }
+      }
       final playing = controller.value.isPlaying;
       if (_lastVideoPlaying != playing) {
         _lastVideoPlaying = playing;
@@ -1391,6 +1634,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       }
     }
     if (state == AppLifecycleState.paused &&
+        _videoBackgroundModeEnabled &&
         mounted &&
         controller.value.isInitialized &&
         controller.value.isPlaying &&
@@ -1432,7 +1676,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       }
       final positionDelta =
           (state.position - controller.value.position).inMilliseconds.abs();
-      if (positionDelta > 1800 && !_syncingBackgroundAudio) {
+      if (positionDelta > 700 && !_syncingBackgroundAudio) {
         _syncingBackgroundAudio = true;
         try {
           // Seeking from the Android notification must move the visible video too.
@@ -1478,6 +1722,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       }
       if (_backgroundAudioActive) {
         _videoBackgroundModeEnabled = false;
+        await prefs.setBool('video_background_enabled_v1', false);
         await _backgroundPlaybackSub?.cancel();
         _backgroundPlaybackSub = null;
         final handler = await getBackgroundAudioHandler();
@@ -1503,6 +1748,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       if (!controller.value.isPlaying) await controller.play();
       await prefs.setInt('resume_${widget.entry.id}', resumePosition.inMilliseconds);
       final handler = await getBackgroundAudioHandler();
+      if (handler is! SNBackgroundAudioHandler) {
+        throw StateError('خدمة تشغيل الخلفية غير جاهزة');
+      }
+      _foregroundHandler = handler;
 
       // Build the same video order into the Android media queue so notification
       // Previous/Next can change tracks, not merely restart the current video.
@@ -1526,7 +1775,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _backgroundQueueEntries = queueEntries;
       _lastBackgroundQueueIndex = startIndex;
       _pendingBackgroundQueueIndex = null;
-      await (handler as SNBackgroundAudioHandler).playQueueInBackground(
+      await handler.playQueueInBackground(
         queueFiles,
         queueTitles,
         startIndex,
@@ -1540,11 +1789,17 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       await controller.setVolume(0.0);
       debugPrint('SamirNet background audio confirmed playing; video audio muted');
       _videoBackgroundModeEnabled = true;
+      await prefs.setBool('video_background_enabled_v1', true);
       if (mounted) setState(() { _backgroundAudioActive = true; _lastVideoPlaying = controller.value.isPlaying; });
       _attachBackgroundPlaybackListener(handler);
       if (showFeedback && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('صوت الخلفية يعمل الآن. يظهر إشعار التحكم، ويمكنك استخدام السابق والتالي والتقديم والإرجاع.')));
     } catch (e) {
+      // A failed activation must not leave a stale enabled preference behind.
       _videoBackgroundModeEnabled = false;
+      try {
+        final failedPrefs = await SharedPreferences.getInstance();
+        await failedPrefs.setBool('video_background_enabled_v1', false);
+      } catch (_) {}
       try { await controller.setVolume(1.0); } catch (_) {}
       try {
         final handler = await getBackgroundAudioHandler();
@@ -1713,13 +1968,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   Widget build(BuildContext context) {
     final v = controller.value;
     return Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTap: () {}, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, onLongPressStart: locked ? null : _beginSpeedBoost, onLongPressEnd: locked ? null : (_) => _endSpeedBoost(), onHorizontalDragStart: locked ? null : _horizontalSeekStart, onHorizontalDragUpdate: locked ? null : _horizontalSeekUpdate, onHorizontalDragEnd: (_) => _gestureStart = null, onVerticalDragStart: locked ? null : _gestureStartAt, onVerticalDragUpdate: locked ? null : _gestureUpdate, onVerticalDragEnd: (_) => _gestureStart = null, child: Stack(alignment: Alignment.center, children: [
-      if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: VideoPlayer(controller))))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: VideoPlayer(controller)))) else if (v.hasError) const Center(child: Text('تعذّر تشغيل هذا الملف', style: TextStyle(color: Colors.white))) else const CircularProgressIndicator(color: coral),
+      if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: VideoPlayer(controller))))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: VideoPlayer(controller)))) else if (_videoOpenError != null || v.hasError) Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.error_outline, color: Colors.white70, size: 44), const SizedBox(height: 12), Text(_videoOpenError ?? 'تعذّر تشغيل هذا الملف', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)), const SizedBox(height: 12), FilledButton.icon(onPressed: () { setState(() { _videoOpenError = null; ready = false; }); controller.initialize().then((_) async { await controller.play(); if (mounted) setState(() => ready = true); }).catchError((Object e) { if (mounted) setState(() => _videoOpenError = 'تعذرت إعادة المحاولة: $e'); }); }, icon: const Icon(Icons.refresh), label: const Text('إعادة المحاولة'))]))) else const CircularProgressIndicator(color: coral),
       if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),
       if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
         Row(children: [
           IconButton(onPressed: () => Navigator.pop(context), tooltip: 'رجوع', icon: const Icon(Icons.arrow_back, color: Colors.white)),
           Expanded(child: Text(widget.entry.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white))),
-          IconButton(tooltip: _backgroundAudioActive ? 'إيقاف صوت الخلفية' : 'تشغيل الصوت في الخلفية', onPressed: _startBackgroundAudio, icon: Icon(Icons.headphones_rounded, color: _backgroundAudioActive ? coral : Colors.white)),
+          IconButton(tooltip: (_backgroundAudioActive || _videoBackgroundModeEnabled) ? 'إيقاف وضع الفيديو في الخلفية لكل الفيديوهات' : 'تفعيل وضع الفيديو في الخلفية لكل الفيديوهات', onPressed: _startBackgroundAudio, icon: Icon(Icons.headphones_rounded, color: (_backgroundAudioActive || _videoBackgroundModeEnabled) ? coral : Colors.white)),
           IconButton(tooltip: 'تدوير الشاشة', onPressed: _toggleFullscreen, icon: const Icon(Icons.screen_rotation, color: Colors.white)),
           IconButton(tooltip: locked ? 'إلغاء قفل اللمس' : 'قفل اللمس', onPressed: () { setState(() { locked = !locked; if (!locked) controls = true; }); _hideTimer?.cancel(); SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky); if (!locked) _scheduleHide(); }, icon: Icon(locked ? Icons.lock_rounded : Icons.lock_open_rounded, color: locked ? coral : Colors.white)),
           PopupMenuButton<String>(icon: const Icon(Icons.more_vert, color: Colors.white), onSelected: (value) {

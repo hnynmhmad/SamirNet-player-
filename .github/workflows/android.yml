@@ -2,7 +2,7 @@ name: Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/offline-file-transfer, fix/nearby-transfer-session]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -25,6 +25,39 @@ jobs:
           cache: true
       - name: Generate Android platform files
         run: flutter create --platforms=android --org com.samirnet .
+      - name: Configure permissions for offline nearby transfer
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          permissions = [
+              '    <uses-permission android:name="android.permission.CAMERA" />',
+              '    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />',
+              '    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />',
+              '    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />',
+              '    <uses-permission android:name="android.permission.INTERNET" />',
+              '    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />',
+              '    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />',
+              '    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />',
+              '    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />',
+              '    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />',
+              '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="32" />',
+              '    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />',
+          ]
+          for permission in permissions:
+              permission_name = permission.split('android:name="', 1)[1].split('"', 1)[0]
+              if permission_name not in text:
+                  if '<application' not in text:
+                      raise SystemExit('AndroidManifest.xml has no application element')
+                  text = text.replace('<application', permission + '\n    <application', 1)
+          manifest.write_text(text)
+          for required in ('android.permission.CAMERA', 'android.permission.NEARBY_WIFI_DEVICES'):
+              if required not in manifest.read_text():
+                  raise SystemExit('Missing required permission: ' + required)
+          print('Configured and verified camera and offline nearby-transfer permissions.')
+          PY
       - name: Create SM Player launcher icon
         shell: bash
         run: |
@@ -351,10 +384,21 @@ jobs:
                   </intent-filter>
               </receiver>
           '''
-          if 'com.ryanheise.audioservice.AudioService' not in manifest:
-              manifest = manifest.replace('</application>', service + '    </application>', 1)
-          if 'com.ryanheise.audioservice.AudioService' not in manifest or 'com.ryanheise.audioservice.MediaButtonReceiver' not in manifest:
-              raise SystemExit('Failed to configure audio_service media notification components')
+          # Media3 is the sole owner of playback notifications and media buttons.
+          # Do not add the legacy audio_service service or receiver.
+          import re
+          manifest = re.sub(
+              r'\s*<service\b(?=[^>]*android:name="com\.ryanheise\.audioservice\.AudioService")[\s\S]*?</service>',
+              '',
+              manifest,
+          )
+          manifest = re.sub(
+              r'\s*<receiver\b(?=[^>]*android:name="com\.ryanheise\.audioservice\.MediaButtonReceiver")[\s\S]*?</receiver>',
+              '',
+              manifest,
+          )
+          if 'com.ryanheise.audioservice.AudioService' in manifest or 'com.ryanheise.audioservice.MediaButtonReceiver' in manifest:
+              raise SystemExit('Legacy audio_service components conflict with Media3 notification ownership')
           path.write_text(manifest)
           import xml.etree.ElementTree as ET
           ET.parse(path)
@@ -362,7 +406,284 @@ jobs:
           for permission in permissions:
               if permission not in saved:
                   raise SystemExit('Missing media permission after manifest update: ' + permission)
-          print('Configured and validated foreground media playback service, media buttons, and Android notification permissions.')
+          print('Configured and validated Media3 foreground playback permissions without legacy service conflicts.')
+          PY
+      - name: Wire Flutter to the native Media3 playback service
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          expected = 'com.samirnet.snplayer'
+          roots = [Path('android/app/src/main/kotlin'), Path('android/app/src/main/java')]
+          matches = [p for root in roots if root.exists() for p in root.rglob('MainActivity.kt')]
+          if len(matches) != 1:
+              raise SystemExit(f'Expected one Kotlin MainActivity, found {len(matches)}')
+          path = matches[0]
+          source = path.read_text()
+          if 'com.samirnet.snplayer/media3' in source:
+              print('Native Media3 Flutter channel already present.')
+          else:
+              needle = '\n    }\n}'
+              insertion = r'''
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.samirnet.snplayer/media3")
+                      .setMethodCallHandler { call, result ->
+                          try {
+                              val intent = Intent(this, SMPlayerMediaSessionService::class.java)
+                              when (call.method) {
+                                  "getState" -> {
+                                      result.success(SMPlayerMediaSessionService.currentState())
+                                      return@setMethodCallHandler
+                                  }
+                                  "playQueue" -> {
+                                      val paths = (call.argument<List<String>>("paths") ?: emptyList()).toCollection(ArrayList())
+                                      val titles = (call.argument<List<String>>("titles") ?: emptyList()).toCollection(ArrayList())
+                                      if (paths.isEmpty() || paths.size != titles.size) {
+                                          result.error("INVALID_QUEUE", "The media queue is empty or mismatched", null)
+                                          return@setMethodCallHandler
+                                      }
+                                      intent.putExtra(SMPlayerMediaSessionService.EXTRA_ACTION, SMPlayerMediaSessionService.ACTION_PLAY_QUEUE)
+                                      intent.putStringArrayListExtra(SMPlayerMediaSessionService.EXTRA_PATHS, paths)
+                                      intent.putStringArrayListExtra(SMPlayerMediaSessionService.EXTRA_TITLES, titles)
+                                      intent.putExtra(SMPlayerMediaSessionService.EXTRA_INDEX, call.argument<Int>("index") ?: 0)
+                                      intent.putExtra(SMPlayerMediaSessionService.EXTRA_POSITION_MS, call.argument<Number>("positionMs")?.toLong() ?: 0L)
+                                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+                                  }
+                                  "play", "pause", "stop", "skipNext", "skipPrevious", "seek", "setSpeed", "setRepeatMode", "setShuffle" -> {
+                                      val action = when (call.method) {
+                                          "play" -> SMPlayerMediaSessionService.ACTION_PLAY
+                                          "pause" -> SMPlayerMediaSessionService.ACTION_PAUSE
+                                          "stop" -> SMPlayerMediaSessionService.ACTION_STOP
+                                          "skipNext" -> SMPlayerMediaSessionService.ACTION_SKIP_NEXT
+                                          "skipPrevious" -> SMPlayerMediaSessionService.ACTION_SKIP_PREVIOUS
+                                          "seek" -> SMPlayerMediaSessionService.ACTION_SEEK
+                                          "setSpeed" -> SMPlayerMediaSessionService.ACTION_SET_SPEED
+                                          "setRepeatMode" -> SMPlayerMediaSessionService.ACTION_SET_REPEAT
+                                          else -> SMPlayerMediaSessionService.ACTION_SET_SHUFFLE
+                                      }
+                                      intent.putExtra(SMPlayerMediaSessionService.EXTRA_ACTION, action)
+                                      when (call.method) {
+                                          "seek" -> intent.putExtra(SMPlayerMediaSessionService.EXTRA_POSITION_MS, call.argument<Number>("positionMs")?.toLong() ?: 0L)
+                                          "setSpeed" -> intent.putExtra(SMPlayerMediaSessionService.EXTRA_SPEED, (call.argument<Number>("speed")?.toFloat() ?: 1f))
+                                          "setRepeatMode" -> intent.putExtra(SMPlayerMediaSessionService.EXTRA_REPEAT_MODE, call.argument<Int>("mode") ?: 0)
+                                          "setShuffle" -> intent.putExtra(SMPlayerMediaSessionService.EXTRA_SHUFFLE, call.argument<Boolean>("enabled") ?: false)
+                                      }
+                                      startService(intent)
+                                  }
+                                  else -> {
+                                      result.notImplemented()
+                                      return@setMethodCallHandler
+                                  }
+                              }
+                              result.success(true)
+                          } catch (error: Exception) {
+                              result.error("MEDIA3_COMMAND_FAILED", error.message, null)
+                          }
+                      }
+              '''
+              if needle not in source:
+                  raise SystemExit('Could not find configureFlutterEngine closing point for Media3 channel')
+              source = source.replace(needle, '\n' + insertion + '    }\n}', 1)
+              path.write_text(source)
+          print('Verified Flutter method channel for native Media3 queue and transport controls.')
+          PY
+      - name: Add native AndroidX Media3 playback service
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          package = 'com.samirnet.snplayer'
+          kotlin_root = Path('android/app/src/main/kotlin') / Path(*package.split('.'))
+          kotlin_root.mkdir(parents=True, exist_ok=True)
+          service_path = kotlin_root / 'SMPlayerMediaSessionService.kt'
+          service_path.write_text(r'''package com.samirnet.snplayer
+
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Bundle
+          import androidx.media3.common.AudioAttributes
+          import androidx.media3.common.C
+          import androidx.media3.common.MediaItem
+          import androidx.media3.common.MediaMetadata
+          import androidx.media3.common.Player
+          import androidx.media3.exoplayer.ExoPlayer
+          import androidx.media3.session.MediaSession
+          import androidx.media3.session.MediaSessionService
+          import java.io.File
+
+          class SMPlayerMediaSessionService : MediaSessionService() {
+              private lateinit var player: ExoPlayer
+              private lateinit var mediaSession: MediaSession
+
+              override fun onCreate() {
+                  instance = this
+                  super.onCreate()
+                  player = ExoPlayer.Builder(this).build().apply {
+                      setAudioAttributes(
+                          AudioAttributes.Builder()
+                              .setUsage(C.USAGE_MEDIA)
+                              .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                              .build(),
+                          true
+                      )
+                      setHandleAudioBecomingNoisy(true)
+                  }
+                  mediaSession = MediaSession.Builder(this, player)
+                      .setCallback(object : MediaSession.Callback {
+                          override fun onConnect(
+                              session: MediaSession,
+                              controller: MediaSession.ControllerInfo
+                          ): MediaSession.ConnectionResult {
+                              return super.onConnect(session, controller)
+                          }
+                      })
+                      .build()
+              }
+
+              fun currentStateMap(): Map<String, Any> = mapOf(
+                  "isPlaying" to player.isPlaying,
+                  "positionMs" to player.currentPosition.coerceAtLeast(0L),
+                  "durationMs" to player.duration.coerceAtLeast(0L),
+                  "index" to player.currentMediaItemIndex
+              )
+
+              override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = mediaSession
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  val startResult = super.onStartCommand(intent, flags, startId)
+                  when (intent?.getStringExtra(EXTRA_ACTION)) {
+                      ACTION_PLAY_QUEUE -> playQueue(intent)
+                      ACTION_PLAY -> player.play()
+                      ACTION_PAUSE -> player.pause()
+                      ACTION_STOP -> {
+                          player.pause()
+                          player.clearMediaItems()
+                          stopSelf()
+                      }
+                      ACTION_SEEK -> player.seekTo(intent.getLongExtra(EXTRA_POSITION_MS, 0L).coerceAtLeast(0L))
+                      ACTION_SKIP_NEXT -> if (player.hasNextMediaItem()) player.seekToNextMediaItem()
+                      ACTION_SKIP_PREVIOUS -> if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem() else player.seekTo(0L)
+                      ACTION_SET_SPEED -> player.setPlaybackSpeed(intent.getFloatExtra(EXTRA_SPEED, 1f).coerceIn(0.5f, 2f))
+                      ACTION_SET_REPEAT -> player.repeatMode = intent.getIntExtra(EXTRA_REPEAT_MODE, Player.REPEAT_MODE_OFF)
+                      ACTION_SET_SHUFFLE -> player.shuffleModeEnabled = intent.getBooleanExtra(EXTRA_SHUFFLE, false)
+                  }
+                  return startResult
+              }
+
+              private fun playQueue(intent: Intent) {
+                  val paths = intent.getStringArrayListExtra(EXTRA_PATHS) ?: arrayListOf()
+                  val titles = intent.getStringArrayListExtra(EXTRA_TITLES) ?: arrayListOf()
+                  if (paths.isEmpty() || paths.size != titles.size) return
+                  val items = paths.indices.map { index ->
+                      val file = File(paths[index])
+                      MediaItem.Builder()
+                          .setMediaId(file.absolutePath)
+                          .setUri(Uri.fromFile(file))
+                          .setMediaMetadata(
+                              MediaMetadata.Builder()
+                                  .setTitle(titles[index].ifBlank { file.name })
+                                  .setArtist("SM Player")
+                                  .build()
+                          )
+                          .build()
+                  }
+                  val index = intent.getIntExtra(EXTRA_INDEX, 0).coerceIn(0, items.lastIndex)
+                  val position = intent.getLongExtra(EXTRA_POSITION_MS, 0L).coerceAtLeast(0L)
+                  player.setMediaItems(items, index, position)
+                  player.prepare()
+                  player.playWhenReady = true
+              }
+
+              override fun onTaskRemoved(rootIntent: Intent?) {
+                  if (!player.isPlaying) stopSelf()
+              }
+
+              override fun onDestroy() {
+                  if (instance === this) instance = null
+                  mediaSession.release()
+                  player.release()
+                  super.onDestroy()
+              }
+
+              companion object {
+                  @Volatile private var instance: SMPlayerMediaSessionService? = null
+                  fun currentState(): Map<String, Any> = instance?.currentStateMap() ?: mapOf(
+                      "isPlaying" to false, "positionMs" to 0L, "durationMs" to 0L, "index" to -1
+                  )
+                  const val EXTRA_ACTION = "smplayer.action"
+                  const val EXTRA_PATHS = "smplayer.paths"
+                  const val EXTRA_TITLES = "smplayer.titles"
+                  const val EXTRA_INDEX = "smplayer.index"
+                  const val EXTRA_POSITION_MS = "smplayer.positionMs"
+                  const val EXTRA_SPEED = "smplayer.speed"
+                  const val EXTRA_REPEAT_MODE = "smplayer.repeatMode"
+                  const val EXTRA_SHUFFLE = "smplayer.shuffle"
+                  const val ACTION_PLAY_QUEUE = "playQueue"
+                  const val ACTION_PLAY = "play"
+                  const val ACTION_PAUSE = "pause"
+                  const val ACTION_STOP = "stop"
+                  const val ACTION_SEEK = "seek"
+                  const val ACTION_SKIP_NEXT = "skipNext"
+                  const val ACTION_SKIP_PREVIOUS = "skipPrevious"
+                  const val ACTION_SET_SPEED = "setSpeed"
+                  const val ACTION_SET_REPEAT = "setRepeatMode"
+                  const val ACTION_SET_SHUFFLE = "setShuffle"
+              }
+          }
+          '''.replace('          ', ''))
+
+          gradle_candidates = [Path('android/app/build.gradle.kts'), Path('android/app/build.gradle')]
+          gradle = next((p for p in gradle_candidates if p.exists()), None)
+          if gradle is None:
+              raise SystemExit('Android Gradle app file missing while adding Media3')
+          text = gradle.read_text()
+          dependencies = [
+              'androidx.media3:media3-exoplayer:1.8.0',
+              'androidx.media3:media3-session:1.8.0',
+          ]
+          if gradle.suffix == '.kts':
+              block = 'dependencies {'
+              additions = ''.join(f'    implementation("{dep}")\n' for dep in dependencies)
+              if dependencies[0] not in text:
+                  if block in text:
+                      text = text.replace(block, block + '\n' + additions, 1)
+                  else:
+                      text += '\ndependencies {\n' + additions + '}\n'
+          else:
+              block = 'dependencies {'
+              additions = ''.join(f"    implementation '{dep}'\n" for dep in dependencies)
+              if dependencies[0] not in text:
+                  if block in text:
+                      text = text.replace(block, block + '\n' + additions, 1)
+                  else:
+                      text += '\ndependencies {\n' + additions + '}\n'
+          gradle.write_text(text)
+
+          manifest_path = Path('android/app/src/main/AndroidManifest.xml')
+          manifest = manifest_path.read_text()
+          service = '''    <service
+                  android:name="com.samirnet.snplayer.SMPlayerMediaSessionService"
+                  android:foregroundServiceType="mediaPlayback"
+                  android:exported="true"
+                  android:stopWithTask="false">
+                  <intent-filter>
+                      <action android:name="androidx.media3.session.MediaSessionService" />
+                      <action android:name="android.media.browse.MediaBrowserService" />
+                  </intent-filter>
+              </service>
+          '''
+          if 'com.samirnet.snplayer.SMPlayerMediaSessionService' not in manifest:
+              manifest = manifest.replace('</application>', service + '    </application>', 1)
+          manifest_path.write_text(manifest)
+          import xml.etree.ElementTree as ET
+          ET.parse(manifest_path)
+          if 'androidx.media3:media3-session:1.8.0' not in gradle.read_text():
+              raise SystemExit('Media3 session dependency was not written')
+          if 'com.samirnet.snplayer.SMPlayerMediaSessionService' not in manifest_path.read_text():
+              raise SystemExit('Media3 service was not registered in AndroidManifest.xml')
+          print('Added native Media3 ExoPlayer + MediaSessionService, Gradle dependencies and manifest registration.')
           PY
       - name: Set Android app compile SDK to 36
         shell: bash
@@ -415,24 +736,19 @@ jobs:
                   raise SystemExit('AndroidManifest.xml has no application element')
               text = text.replace('<application', element + '\n    <application', 1)
           text = text.replace('android:label="samirnet_player"', 'android:label="SM Player"')
-          service = '''        <service
-                      android:name="com.ryanheise.audioservice.AudioService"
-                      android:foregroundServiceType="mediaPlayback"
-                      android:exported="true"
-                      android:stopWithTask="false">
-                      <intent-filter>
-                          <action android:name="android.media.browse.MediaBrowserService" />
-                      </intent-filter>
-                  </service>
-                  <receiver
-                      android:name="com.ryanheise.audioservice.MediaButtonReceiver"
-                      android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MEDIA_BUTTON" />
-                      </intent-filter>
-                  </receiver>'''
-          if 'com.ryanheise.audioservice.AudioService' not in text:
-              text = text.replace('</application>', service + '\n    </application>', 1)
+          # Media3 is the sole owner of playback notifications and media buttons.
+          # Do not register the legacy audio_service Android service alongside it.
+          import re
+          text = re.sub(
+              r'\s*<service\b(?=[^>]*android:name="com\.ryanheise\.audioservice\.AudioService")[\s\S]*?</service>',
+              '',
+              text,
+          )
+          text = re.sub(
+              r'\s*<receiver\b(?=[^>]*android:name="com\.ryanheise\.audioservice\.MediaButtonReceiver")[\s\S]*?</receiver>',
+              '',
+              text,
+          )
           path.write_text(text)
           import xml.etree.ElementTree as ET
           ET.parse(path)
@@ -441,8 +757,15 @@ jobs:
                   raise SystemExit('Missing media permission: ' + permission)
           print('Verified Android media permissions, manifest XML, and SM Player label')
           PY
-      - name: Resolve dependencies
-        run: flutter pub get
+      - name: Clean generated Flutter and Android plugin state
+        run: |
+          flutter clean
+          rm -rf .dart_tool build android/.gradle
+          rm -f pubspec.lock
+      - name: Resolve dependencies reproducibly
+        run: |
+          flutter pub get
+          flutter pub deps --style=compact | grep -E 'shared_preferences(_android)? ' 
       - name: Normalize Android plugin compile SDK versions
         shell: bash
         run: |

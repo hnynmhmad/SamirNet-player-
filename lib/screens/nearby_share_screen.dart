@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:camera/camera.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../services/wifi_transfer_service.dart';
@@ -59,38 +63,36 @@ class NearbyShareScreen extends StatelessWidget {
                 color: _shareRed,
                 background: const Color(0xFFFCE8E8),
                 icon: Icons.file_upload_outlined,
-                title: 'إرسال الملفات',
-                subtitle: 'اختر ملفاتك ثم امسح رمز جهاز الاستقبال',
-                onTap: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const _SendScreen())),
+                title: 'إرسال الملفات — مباشر دون إنترنت',
+                subtitle: 'اختر ملفاتك وابحث عن هاتف صديقك القريب',
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen(receiveMode: false))),
               ),
               const SizedBox(height: 14),
               _ActionCard(
                 color: _shareBlue,
                 background: const Color(0xFFE4EEFC),
                 icon: Icons.file_download_outlined,
-                title: 'استلام الملفات',
-                subtitle: 'اعرض رمز QR ليقوم صديقك بمسحه',
-                onTap: () => Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => const _ReceiveScreen())),
+                title: 'استلام الملفات — مباشر دون إنترنت',
+                subtitle: 'اجعل هاتفك ظاهرًا للأجهزة القريبة',
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen(receiveMode: true))),
               ),
               const SizedBox(height: 14),
               _ActionCard(
                 color: const Color(0xFF16866A),
                 background: const Color(0xFFE1F5ED),
                 icon: Icons.radar_rounded,
-                title: 'الأجهزة القريبة — إرسال مباشر',
-                subtitle: 'اكتشاف تلقائي ونقل دون إنترنت',
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen(receiveMode: false))),
+                title: 'إرسال عبر QR — شبكة محلية',
+                subtitle: 'بديل عند اتصال الهاتفين بشبكة Wi-Fi أو نقطة اتصال',
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _SendScreen())),
               ),
               const SizedBox(height: 14),
               _ActionCard(
                 color: const Color(0xFF3979D5),
                 background: const Color(0xFFE4EEFC),
                 icon: Icons.phonelink_ring_rounded,
-                title: 'استلام من جهاز قريب',
-                subtitle: 'اجعل هاتفك ظاهرًا للأجهزة القريبة',
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NearbyDevicesScreen(receiveMode: true))),
+                title: 'استلام عبر QR — شبكة محلية',
+                subtitle: 'اعرض رمز QR ليستلمه صديقك عبر الشبكة المحلية',
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _ReceiveScreen())),
               ),
               const SizedBox(height: 18),
               const ListTile(
@@ -606,62 +608,268 @@ class _SendScreenState extends State<_SendScreen> {
 
 class _ScanReceiverScreen extends StatefulWidget {
   const _ScanReceiverScreen();
+
   @override
   State<_ScanReceiverScreen> createState() => _ScanReceiverScreenState();
 }
 
-class _ScanReceiverScreenState extends State<_ScanReceiverScreen> {
+class _ScanReceiverScreenState extends State<_ScanReceiverScreen>
+    with WidgetsBindingObserver {
+  CameraController? _controller;
+  final BarcodeScanner _scanner = BarcodeScanner(
+    formats: const [BarcodeFormat.qrCode],
+  );
+  bool _starting = false;
+  bool _processing = false;
   bool _handled = false;
+  String? _error;
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('مسح رمز جهاز الاستقبال')),
-        body: Stack(
-          children: [
-            MobileScanner(
-              errorBuilder: (context, error) => Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.camera_alt_outlined, size: 48, color: Colors.white),
-                      const SizedBox(height: 12),
-                      Text(
-                        'تعذر تشغيل الكاميرا: ${error.errorCode.name}. تأكد من منح إذن الكاميرا وإغلاق أي تطبيق يستخدمها، ثم أعد فتح الماسح.',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ],
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startCamera());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      unawaited(_disposeCamera());
+    } else if (state == AppLifecycleState.resumed &&
+        !_handled &&
+        _controller == null) {
+      unawaited(_startCamera());
+    }
+  }
+
+  Future<void> _disposeCamera({bool updateUi = true}) async {
+    final old = _controller;
+    _controller = null;
+    if (updateUi && mounted) setState(() {});
+    if (old != null) {
+      try {
+        if (old.value.isStreamingImages) await old.stopImageStream();
+      } catch (_) {}
+      try {
+        await old.dispose();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _startCamera() async {
+    if (_starting || !mounted || _handled) return;
+    setState(() {
+      _starting = true;
+      _error = null;
+    });
+    await _disposeCamera();
+    try {
+      var permission = await Permission.camera.status;
+      if (!permission.isGranted) permission = await Permission.camera.request();
+      if (!permission.isGranted) {
+        if (permission.isPermanentlyDenied) {
+          await openAppSettings();
+          throw Exception('إذن الكاميرا مرفوض نهائيًا. اسمح به من إعدادات التطبيق.');
+        }
+        throw Exception('يجب السماح باستخدام الكاميرا لمسح رمز QR.');
+      }
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) throw Exception('لم يعثر Android على كاميرا متاحة.');
+      final selected = cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.back,
+        orElse: () => cameras.first,
+      );
+      final controller = CameraController(
+        selected,
+        ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.yuv420,
+      );
+      await controller.initialize();
+      if (!mounted || _handled) {
+        await controller.dispose();
+        return;
+      }
+      _controller = controller;
+      await controller.startImageStream(_processFrame);
+      if (mounted) setState(() {});
+    } catch (error) {
+      await _disposeCamera();
+      if (mounted) {
+        setState(() => _error = 'تعذر تشغيل كاميرا CameraX: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  Future<void> _processFrame(CameraImage image) async {
+    if (_processing || _handled || !mounted) return;
+    _processing = true;
+    try {
+      final controller = _controller;
+      if (controller == null || !controller.value.isInitialized) return;
+      final rotation = InputImageRotationValue.fromRawValue(
+        controller.description.sensorOrientation,
+      );
+      if (rotation == null || image.planes.length < 3) return;
+
+      // Convert padded CameraX YUV_420_888 planes to packed NV21. Passing the
+      // planes concatenated without respecting row/pixel strides can prevent
+      // ML Kit from decoding an otherwise visible QR code.
+      final width = image.width;
+      final height = image.height;
+      final yPlane = image.planes[0];
+      final uPlane = image.planes[1];
+      final vPlane = image.planes[2];
+      final nv21 = Uint8List(width * height * 3 ~/ 2);
+      var output = 0;
+      final yPixelStride = yPlane.bytesPerPixel ?? 1;
+      for (var row = 0; row < height; row++) {
+        final rowStart = row * yPlane.bytesPerRow;
+        for (var col = 0; col < width; col++) {
+          nv21[output++] = yPlane.bytes[rowStart + col * yPixelStride];
+        }
+      }
+      final uPixelStride = uPlane.bytesPerPixel ?? 1;
+      final vPixelStride = vPlane.bytesPerPixel ?? 1;
+      for (var row = 0; row < height ~/ 2; row++) {
+        final uRow = row * uPlane.bytesPerRow;
+        final vRow = row * vPlane.bytesPerRow;
+        for (var col = 0; col < width ~/ 2; col++) {
+          nv21[output++] = vPlane.bytes[vRow + col * vPixelStride];
+          nv21[output++] = uPlane.bytes[uRow + col * uPixelStride];
+        }
+      }
+      final input = InputImage.fromBytes(
+        bytes: nv21,
+        metadata: InputImageMetadata(
+          size: Size(width.toDouble(), height.toDouble()),
+          rotation: rotation,
+          format: InputImageFormat.nv21,
+          bytesPerRow: width,
+        ),
+      );
+      final barcodes = await _scanner.processImage(input);
+      for (final barcode in barcodes) {
+        final value = barcode.rawValue;
+        if (value == null || value.trim().isEmpty) continue;
+        try {
+          final parsed = jsonDecode(value);
+          if (parsed is! Map<String, dynamic> ||
+              parsed['app'] != 'SMPlayerShare' ||
+              parsed['version'] != 1 ||
+              parsed['url'] is! String ||
+              parsed['token'] is! String) {
+            continue;
+          }
+          final uri = Uri.tryParse(parsed['url'] as String);
+          if (uri == null ||
+              uri.scheme != 'http' ||
+              uri.host.isEmpty ||
+              uri.port <= 0 ||
+              (parsed['token'] as String).isEmpty) {
+            continue;
+          }
+          _handled = true;
+          await _disposeCamera();
+          if (mounted) Navigator.of(context).pop(value);
+          return;
+        } on FormatException {
+          continue;
+        }
+      }
+    } catch (error) {
+      debugPrint('QR frame analysis failed: $error');
+    } finally {
+      _processing = false;
+    }
+  }
+
+  Future<void> _retryCamera() async {
+    if (_starting) return;
+    _handled = false;
+    await _startCamera();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(_disposeCamera(updateUi: false));
+    unawaited(_scanner.close());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('مسح رمز QR'),
+            leading: IconButton(
+              onPressed: () => Navigator.of(context).pop(),
+              icon: const Icon(Icons.close),
+            ),
+          ),
+          body: SafeArea(
+            child: Column(
+              children: [
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'وجّه الكاميرا نحو رمز QR الظاهر على هاتف المستقبِل.',
+                    textAlign: TextAlign.center,
                   ),
                 ),
-              ),
-              onDetect: (capture) {
-                if (_handled) return;
-                for (final barcode in capture.barcodes) {
-                  final value = barcode.rawValue;
-                  if (value == null || value.isEmpty) continue;
-                  _handled = true;
-                  Navigator.pop(context, value);
-                  break;
-                }
-              },
-            ),
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Container(
-                margin: const EdgeInsets.all(20),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                    color: Colors.black87,
-                    borderRadius: BorderRadius.circular(16)),
-                child: const Text(
-                  'وجّه الكاميرا نحو رمز QR الظاهر على هاتف المستقبِل.',
-                  style: TextStyle(color: Colors.white),
-                  textAlign: TextAlign.center,
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: _controller != null &&
+                              _controller!.value.isInitialized &&
+                              _controller!.value.previewSize != null
+                          ? CameraPreview(_controller!)
+                          : Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(24),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (_starting)
+                                      const CircularProgressIndicator()
+                                    else
+                                      const Icon(Icons.no_photography_outlined,
+                                          size: 52),
+                                    const SizedBox(height: 16),
+                                    if (_error != null)
+                                      Text(_error!, textAlign: TextAlign.center),
+                                    const SizedBox(height: 16),
+                                    FilledButton.icon(
+                                      onPressed: _starting ? null : _retryCamera,
+                                      icon: const Icon(Icons.refresh_rounded),
+                                      label: Text(_starting
+                                          ? 'جارٍ تشغيل الكاميرا...'
+                                          : 'إعادة تشغيل الكاميرا'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
                 ),
-              ),
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'يتم الاتصال مباشرة بين الهاتفين عبر الشبكة المحلية؛ لا يلزم الإنترنت.',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       );
 }

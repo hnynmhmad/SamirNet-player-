@@ -2,41 +2,24 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:video_player/video_player.dart';
 
 /// Owns the single Android media session and the playback-control notification.
 /// Initialization can be retried if Android/plugin setup fails during startup.
+const MethodChannel _media3Channel = MethodChannel('com.samirnet.snplayer/media3');
 Future<AudioHandler>? _mediaHandlerFuture;
 
 Future<AudioHandler> getBackgroundAudioHandler() async {
   final existing = _mediaHandlerFuture;
   if (existing != null) return existing;
-
-  final future = AudioService.init(
-    builder: () => SNBackgroundAudioHandler(),
-    config: AudioServiceConfig(
-      androidNotificationChannelId: 'com.samirnet.snplayer.media.v3',
-      androidNotificationChannelName: 'SM Player · التحكم بالوسائط',
-      androidNotificationChannelDescription: 'أزرار التحكم بتشغيل الصوت والفيديو.',
-      androidNotificationOngoing: true,
-      androidStopForegroundOnPause: false,
-      androidNotificationClickStartsActivity: true,
-      androidNotificationIcon: 'drawable/ic_stat_player',
-    ),
-  );
-  _mediaHandlerFuture = future;
-  try {
-    final handler = await future;
-    return handler;
-  } catch (error, stack) {
-    if (identical(_mediaHandlerFuture, future)) {
-      _mediaHandlerFuture = null;
-    }
-    debugPrint('Media session initialization failed; allowing retry: $error');
-    Error.throwWithStackTrace(error, stack);
-  }
+  // Keep AudioHandler as the Flutter-facing API, but let AndroidX Media3 own the
+  // actual Android MediaSession, foreground service and system media notification.
+  final handler = SNBackgroundAudioHandler();
+  _mediaHandlerFuture = Future<AudioHandler>.value(handler);
+  return handler;
 }
 
 Future<void> initializeMediaSession() async {
@@ -117,15 +100,8 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     ));
   }
   SNBackgroundAudioHandler() {
-    Timer.periodic(const Duration(milliseconds: 250), (_) {
-      if (_backgroundQueueActive && _player.playing) {
-        playbackState.add(playbackState.value.copyWith(
-          updatePosition: _player.position,
-          bufferedPosition: _player.bufferedPosition,
-          playing: true,
-          speed: _player.speed,
-        ));
-      }
+    Timer.periodic(const Duration(milliseconds: 400), (_) {
+      if (_backgroundQueueActive) unawaited(_syncNativeState());
     });
     _player.positionStream.listen((position) {
       if (!_backgroundQueueActive) return;
@@ -265,16 +241,47 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     if (!_backgroundQueueActive) return false;
     final index = queue.value.indexWhere((item) => item.id == path);
     if (index < 0) return false;
-    await _player.seek(position, index: index);
-    _publishCurrentItem(index);
-    _publishCurrentDuration(_player.duration);
+    await _media3Channel.invokeMethod<bool>('playQueue', {
+      'paths': queue.value.map((item) => item.id).toList(),
+      'titles': queue.value.map((item) => item.title).toList(),
+      'index': index,
+      'positionMs': position.inMilliseconds,
+    });
+    mediaItem.add(queue.value[index]);
     playbackState.add(playbackState.value.copyWith(
-      playing: _player.playing,
-      updatePosition: _player.position,
-      bufferedPosition: _player.bufferedPosition,
+      playing: true,
+      updatePosition: position,
       queueIndex: index,
+      processingState: AudioProcessingState.ready,
     ));
     return true;
+  }
+
+  Future<void> _syncNativeState() async {
+    try {
+      final state = await _media3Channel.invokeMapMethod<String, dynamic>('getState');
+      if (state == null || !_backgroundQueueActive) return;
+      final position = Duration(milliseconds: (state['positionMs'] as num?)?.toInt() ?? 0);
+      final durationMs = (state['durationMs'] as num?)?.toInt() ?? 0;
+      final index = (state['index'] as num?)?.toInt() ?? -1;
+      final playing = state['isPlaying'] == true;
+      if (index >= 0 && index < queue.value.length) {
+        final item = queue.value[index];
+        final duration = durationMs > 0 ? Duration(milliseconds: durationMs) : item.duration;
+        if (mediaItem.value?.id != item.id || mediaItem.value?.duration != duration) {
+          mediaItem.add(item.copyWith(duration: duration));
+        }
+      }
+      playbackState.add(playbackState.value.copyWith(
+        playing: playing,
+        processingState: durationMs > 0 ? AudioProcessingState.ready : AudioProcessingState.buffering,
+        updatePosition: position,
+        bufferedPosition: position,
+        queueIndex: index < 0 ? null : index,
+      ));
+    } catch (error) {
+      debugPrint('Unable to read native Media3 playback state: $error');
+    }
   }
 
   Future<void> playFileInBackground(File file, String title, {Duration startPosition = Duration.zero}) async {
@@ -284,47 +291,22 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     if (files.isEmpty || files.length != titles.length) {
       throw ArgumentError('The music queue is empty or invalid');
     }
-    final preparation = _queuePreparationFuture;
-    if (preparation != null) {
-      try {
-        await preparation;
-      } catch (error) {
-        debugPrint('Background queue preload failed; loading on demand: $error');
-      }
-    }
     final paths = files.map((file) => file.path).toList(growable: false);
-    final canReusePreparedQueue =
-        _preparedQueuePaths != null &&
-        listEquals(_preparedQueuePaths, paths) &&
-        listEquals(_preparedQueueTitles, titles) &&
-        _player.processingState != ProcessingState.idle;
+    final start = initialIndex.clamp(0, files.length - 1).toInt();
+    final items = List<MediaItem>.generate(files.length, (i) =>
+      MediaItem(id: files[i].path, title: titles[i], artist: 'SM Player'));
+    await _media3Channel.invokeMethod<bool>('playQueue', {
+      'paths': paths,
+      'titles': titles,
+      'index': start,
+      'positionMs': startPosition.inMilliseconds,
+    });
     _backgroundQueueActive = true;
     _foregroundVideoController = null;
     _foregroundVideoId = null;
     _foregroundVideoTitle = null;
-    final items = List<MediaItem>.generate(files.length, (i) =>
-      MediaItem(id: files[i].path, title: titles[i], artist: 'SM Player'));
-    final start = initialIndex.clamp(0, files.length - 1).toInt();
     queue.add(items);
     mediaItem.add(items[start]);
-    if (canReusePreparedQueue) {
-      await _player.seek(startPosition, index: start);
-    } else {
-      await _player.setAudioSource(
-        ConcatenatingAudioSource(children: files.map((file) => AudioSource.file(file.path)).toList()),
-        initialIndex: start,
-      );
-      if (startPosition > Duration.zero) await _player.seek(startPosition, index: start);
-      _preparedQueuePaths = paths;
-      _preparedQueueTitles = List<String>.from(titles);
-    }
-    // Publish duration only after the source is prepared. The duration stream may
-    // emit before mediaItem is set, which previously left the UI and media session
-    // with a zero/unknown duration and a seek bar stuck at the start.
-    // Publish the current track after the source is ready. Duration events can
-    // arrive before or after currentIndexStream, so both paths update the item.
-    _publishCurrentItem(start);
-    _publishCurrentDuration(_player.duration);
     playbackState.add(playbackState.value.copyWith(
       controls: const [
         MediaControl.skipToPrevious,
@@ -333,29 +315,27 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
         MediaControl.skipToNext,
       ],
       systemActions: const {MediaAction.seek, MediaAction.seekForward, MediaAction.seekBackward},
-      androidCompactActionIndices: const [0, 1, 3],
       processingState: AudioProcessingState.ready,
-      playing: false,
-      updatePosition: _player.position,
-      bufferedPosition: _player.bufferedPosition,
+      playing: true,
+      updatePosition: startPosition,
+      bufferedPosition: startPosition,
       queueIndex: start,
     ));
-    // Start playback only after publishing the media item and a ready-but-paused
-    // state. The playbackEventStream below publishes playing=true when the
-    // underlying player actually starts, which is what Android uses to promote
-    // the media service and show its notification.
-    // Do not await play(): just_audio completes this future when playback ends.
-    unawaited(_player.play().catchError((Object error, StackTrace stack) {
-      debugPrint('Background audio playback failed: $error\n$stack');
-      playbackState.add(playbackState.value.copyWith(playing: false));
-    }));
   }
   @override
   Future<void> skipToNext() async {
+    if (_backgroundQueueActive) {
+      await _media3Channel.invokeMethod<bool>('skipNext');
+      return;
+    }
     if (_player.hasNext) { await _player.seekToNext(); }
   }
   @override
   Future<void> skipToPrevious() async {
+    if (_backgroundQueueActive) {
+      await _media3Channel.invokeMethod<bool>('skipPrevious');
+      return;
+    }
     if (_player.hasPrevious) { await _player.seekToPrevious(); }
     else { await _player.seek(Duration.zero); }
   }
@@ -365,6 +345,11 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     if (!_backgroundQueueActive && video != null) {
       await video.play();
       syncForegroundVideoState(force: true);
+      return;
+    }
+    if (_backgroundQueueActive) {
+      await _media3Channel.invokeMethod<bool>('play');
+      await _syncNativeState();
       return;
     }
     await _player.play();
@@ -378,6 +363,11 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       syncForegroundVideoState(force: true);
       return;
     }
+    if (_backgroundQueueActive) {
+      await _media3Channel.invokeMethod<bool>('pause');
+      await _syncNativeState();
+      return;
+    }
     await _player.pause();
     playbackState.add(playbackState.value.copyWith(playing: false, updatePosition: _player.position));
   }
@@ -387,6 +377,17 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     if (!_backgroundQueueActive && video != null) {
       await video.pause();
       syncForegroundVideoState(force: true);
+      return;
+    }
+    if (_backgroundQueueActive) {
+      await _media3Channel.invokeMethod<bool>('stop');
+      _backgroundQueueActive = false;
+      playbackState.add(playbackState.value.copyWith(
+        playing: false,
+        processingState: AudioProcessingState.idle,
+        updatePosition: Duration.zero,
+      ));
+      await super.stop();
       return;
     }
     await _player.stop();
@@ -406,6 +407,11 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       syncForegroundVideoState(force: true);
       return;
     }
+    if (_backgroundQueueActive) {
+      await _media3Channel.invokeMethod<bool>('seek', {'positionMs': position.inMilliseconds});
+      await _syncNativeState();
+      return;
+    }
     await _player.seek(position);
   }
   @override
@@ -414,6 +420,10 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
     if (!_backgroundQueueActive && video != null) {
       await video.setPlaybackSpeed(speed);
       syncForegroundVideoState(force: true);
+      return;
+    }
+    if (_backgroundQueueActive) {
+      await _media3Channel.invokeMethod<bool>('setSpeed', {'speed': speed});
       return;
     }
     await _player.setSpeed(speed);
@@ -428,16 +438,29 @@ class SNBackgroundAudioHandler extends BaseAudioHandler with QueueHandler, SeekH
       await playFileInBackground(File(path), title, startPosition: Duration(milliseconds: positionMs < 0 ? 0 : positionMs));
     } else if (name == 'setLoopMode') {
       final value = extras?['value'] as String? ?? 'off';
-      await _player.setLoopMode(value == 'one' ? LoopMode.one : value == 'all' ? LoopMode.all : LoopMode.off);
+      if (_backgroundQueueActive) {
+        final mode = value == 'one' ? 1 : value == 'all' ? 2 : 0;
+        await _media3Channel.invokeMethod<bool>('setRepeatMode', {'mode': mode});
+      } else {
+        await _player.setLoopMode(value == 'one' ? LoopMode.one : value == 'all' ? LoopMode.all : LoopMode.off);
+      }
     } else if (name == 'setShuffle') {
-      await _player.setShuffleModeEnabled(extras?['enabled'] == true);
+      if (_backgroundQueueActive) {
+        await _media3Channel.invokeMethod<bool>('setShuffle', {'enabled': extras?['enabled'] == true});
+      } else {
+        await _player.setShuffleModeEnabled(extras?['enabled'] == true);
+      }
     } else if (name == 'getEqualizerParameters') {
       throw UnsupportedError('المعادل الصوتي غير متاح على هذا الجهاز؛ تم تعطيله لتجنب تعطل تشغيل الموسيقى.');
     } else if (name == 'setEqualizerEnabled' || name == 'setEqualizerBandGain') {
       throw UnsupportedError('المعادل الصوتي غير متاح على هذا الجهاز.');
     } else if (name == 'setMusicSpeed') {
       final v = ((extras?['speed'] as num?)?.toDouble() ?? 1.0).clamp(0.5, 2.0).toDouble();
-      await _player.setSpeed(v);
+      if (_backgroundQueueActive) {
+        await _media3Channel.invokeMethod<bool>('setSpeed', {'speed': v});
+      } else {
+        await _player.setSpeed(v);
+      }
     }
     return null;
   }
