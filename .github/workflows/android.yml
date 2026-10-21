@@ -632,7 +632,13 @@ jobs:
                   player.playWhenReady = true
               }
 
+              override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
+                  Log.i(TAG, "Media notification update requested: startForeground=$startInForegroundRequired isPlaying=${player.isPlaying} playWhenReady=${player.playWhenReady} mediaId=${player.currentMediaItem?.mediaId}")
+                  super.onUpdateNotification(session, startInForegroundRequired)
+              }
+
               override fun onTaskRemoved(rootIntent: Intent?) {
+                  Log.i(TAG, "Task removed while media isPlaying=${player.isPlaying}")
                   if (!player.isPlaying) stopSelf()
               }
 
