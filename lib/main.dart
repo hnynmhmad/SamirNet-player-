@@ -1584,33 +1584,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     }
   }
 
-  Future<void> _prepareVideoBackgroundQueue(AudioHandler handler) async {
-    if (_videoBackgroundModeEnabled || handler is! SNBackgroundAudioHandler) return;
-    // Only preload when the media session belongs to this foreground video.
-    // Never replace an unrelated audio queue while it is playing.
-    if (handler.mediaItem.value?.id != 'foreground:${widget.file.path}') return;
-    try {
-      final files = <File>[];
-      final titles = <String>[];
-      for (final entry in widget.playlist) {
-        final file = entry.id == widget.entry.id ? widget.file : await entry.asset.file;
-        if (file == null) continue;
-        files.add(file);
-        titles.add(entry.name);
-      }
-      if (!files.any((file) => file.path == widget.file.path)) {
-        files.add(widget.file);
-        titles.add(widget.entry.name);
-      }
-      await handler.prepareQueueForBackground(files, titles);
-      debugPrint('SamirNet video background queue preloaded: ${files.length} files');
-    } catch (error) {
-      // The foreground video remains audible; activation can still load the queue
-      // on demand if preloading failed.
-      debugPrint('SamirNet background queue preload failed: $error');
-    }
-  }
-
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && _pendingBackgroundQueueIndex != null) {
@@ -1624,6 +1597,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         }
       }
     }
+    if (state == AppLifecycleState.resumed && mounted && !_videoBackgroundModeEnabled) {
+      SharedPreferences.getInstance().then((prefs) async {
+        final mode = prefs.getString('background_mode') ?? 'audio';
+        if (mode != 'combined' && mode != 'pip') unawaited(controller.play());
+      });
+    }
     if (state == AppLifecycleState.paused && mounted && controller.value.isPlaying) {
       SharedPreferences.getInstance().then((prefs) async {
         final mode = prefs.getString('background_mode') ?? 'audio';
@@ -1634,25 +1613,15 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
             debugPrint('Automatic PiP request failed: $error');
           }
         } else if (!_videoBackgroundModeEnabled) {
-          final handler = _foregroundHandler;
-          if (handler != null) unawaited(handler.stop());
+          // Keep the service alive for a clean return to the foreground, but pause
+          // playback when the user has not enabled background mode.
+          unawaited(controller.pause());
         }
       });
     }
   }
 
-    Future<void> _loadBackgroundQueueEntries(AudioHandler handler) async {
-    final entriesByPath = <String, MediaEntry>{};
-    for (final entry in widget.playlist) {
-      final file = entry.id == widget.entry.id ? widget.file : await entry.asset.file;
-      if (file != null) entriesByPath[file.path] = entry;
-    }
-    _backgroundQueueEntries = handler.queue.value
-        .map((item) => entriesByPath[item.id])
-        .toList(growable: false);
-  }
-
-  void _attachBackgroundPlaybackListener(AudioHandler handler) {
+    void _attachBackgroundPlaybackListener(AudioHandler handler) {
     _backgroundPlaybackSub?.cancel();
     _backgroundPlaybackSub = handler.playbackState.listen((state) {
       if (!mounted) return;
