@@ -1338,10 +1338,21 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   double? _videoDragPosition;
   bool _showTotalDuration = false;
   bool _handledVideoEnd = false;
+  static const MethodChannel _videoViewEvents =
+      MethodChannel('com.samirnet.snplayer/video_view_events');
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // AndroidView is a native platform view and may consume taps before the
+    // enclosing Flutter GestureDetector sees them. The native view reports taps
+    // over the actual video surface through this channel.
+    _videoViewEvents.setMethodCallHandler((call) async {
+      if (call.method == 'videoTap' && mounted && !locked) {
+        _showControls();
+      }
+    });
     unawaited(_prepareBackgroundAudioHandler());
     _isFavorite = widget.favorite;
     _loadVideoModes();
@@ -1676,6 +1687,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       final handler = _foregroundHandler;
       if (handler != null) unawaited(handler.stop());
     }
+    _videoViewEvents.setMethodCallHandler(null);
     controller.removeListener(_update);
     controller.dispose();
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
