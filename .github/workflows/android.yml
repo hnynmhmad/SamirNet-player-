@@ -516,8 +516,11 @@ jobs:
           import androidx.media3.exoplayer.ExoPlayer
           import androidx.media3.session.MediaSession
           import androidx.media3.session.MediaSessionService
+          import androidx.media3.session.DefaultMediaNotificationProvider
+          import androidx.media3.common.util.UnstableApi
           import java.io.File
 
+          @UnstableApi
           class SMPlayerMediaSessionService : MediaSessionService() {
               private lateinit var player: ExoPlayer
               private lateinit var mediaSession: MediaSession
@@ -526,6 +529,16 @@ jobs:
                   super.onCreate()
                   Log.i(TAG, "MediaSessionService created")
                   instance = this
+                  // Pin the media notification to an app-owned channel and stable ID.
+                  // This avoids relying on a library-default channel configuration on
+                  // devices that have previously cached notification settings.
+                  setMediaNotificationProvider(
+                      DefaultMediaNotificationProvider.Builder(this)
+                          .setChannelId("smplayer_media_playback")
+                          .setChannelName(R.string.app_name)
+                          .setNotificationId(4301)
+                          .build()
+                  )
                   player = ExoPlayer.Builder(this).build().apply {
                       setAudioAttributes(
                           AudioAttributes.Builder()
