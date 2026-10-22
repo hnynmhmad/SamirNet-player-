@@ -1359,6 +1359,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       final prefs = await SharedPreferences.getInstance();
       _videoBackgroundModeEnabled = prefs.getBool('video_background_enabled_v1') ?? false;
       final resumeMs = prefs.getInt('resume_${widget.entry.id}') ?? 0;
+      // Load video modes before preparing the native player so UI state, the
+      // Media3 repeat mode, and end-of-item navigation cannot race each other.
+      final repeat = prefs.getBool('video_repeat_v1') ?? false;
+      final shuffle = prefs.getBool('video_shuffle_v1') ?? false;
+      if (mounted) setState(() { _repeat = repeat; _shuffle = shuffle; });
       // Start the currently selected file immediately. Resolving every other
       // gallery asset before prepare() made the screen remain black on large libraries.
       _backgroundQueueEntries = <MediaEntry?>[widget.entry];
@@ -1368,7 +1373,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         queueTitles: <String>[widget.entry.name],
         initialIndex: 0,
         initialPosition: Duration(milliseconds: resumeMs < 0 ? 0 : resumeMs),
-        looping: prefs.getBool('video_repeat_v1') ?? false,
+        looping: repeat,
       );
       final handler = await getBackgroundAudioHandler();
       if (handler is SNBackgroundAudioHandler) {
@@ -1758,7 +1763,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   Widget build(BuildContext context) {
     final v = controller.value;
     final maxMs = v.duration.inMilliseconds <= 0 ? 1 : v.duration.inMilliseconds;
-    return PopScope<bool>(canPop: _allowPop, onPopInvokedWithResult: (didPop, result) { if (!didPop) unawaited(_handleBack()); }, child: Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) { if (controls) { setState(() => controls = false); _hideTimer?.cancel(); } else { _showControls(); } } }, onDoubleTap: () {}, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, onLongPressStart: locked ? null : _beginSpeedBoost, onLongPressEnd: locked ? null : (_) => _endSpeedBoost(), onHorizontalDragStart: locked ? null : _horizontalSeekStart, onHorizontalDragUpdate: locked ? null : _horizontalSeekUpdate, onHorizontalDragEnd: (_) => _gestureStart = null, onVerticalDragStart: locked ? null : _gestureStartAt, onVerticalDragUpdate: locked ? null : _gestureUpdate, onVerticalDragEnd: (_) => _gestureStart = null, child: Stack(alignment: Alignment.center, children: [
+    return PopScope<bool>(canPop: _allowPop, onPopInvokedWithResult: (didPop, result) { if (!didPop) unawaited(_handleBack()); }, child: Directionality(textDirection: TextDirection.ltr, child: Scaffold(backgroundColor: Colors.black, body: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () { if (!locked) _showControls(); }, onDoubleTap: () {}, onDoubleTapDown: (d) { if (!locked) _seek(d.localPosition.dx > MediaQuery.sizeOf(context).width / 2 ? 10 : -10); }, onLongPressStart: locked ? null : _beginSpeedBoost, onLongPressEnd: locked ? null : (_) => _endSpeedBoost(), onHorizontalDragStart: locked ? null : _horizontalSeekStart, onHorizontalDragUpdate: locked ? null : _horizontalSeekUpdate, onHorizontalDragEnd: (_) => _gestureStart = null, onVerticalDragStart: locked ? null : _gestureStartAt, onVerticalDragUpdate: locked ? null : _gestureUpdate, onVerticalDragEnd: (_) => _gestureStart = null, child: Stack(alignment: Alignment.center, children: [
       if (ready) Center(child: fillScreen ? SizedBox.expand(child: FittedBox(fit: BoxFit.cover, child: SizedBox(width: MediaQuery.sizeOf(context).width, height: MediaQuery.sizeOf(context).width / (v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio), child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: AndroidView(viewType: 'com.samirnet.snplayer/video'))))) : AspectRatio(aspectRatio: v.aspectRatio == 0 ? 16 / 9 : v.aspectRatio, child: InteractiveViewer(minScale: 1.0, maxScale: 4.0, panEnabled: true, scaleEnabled: true, boundaryMargin: const EdgeInsets.all(80), child: AndroidView(viewType: 'com.samirnet.snplayer/video')))) else if (_videoOpenError != null || v.hasError) Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.error_outline, color: Colors.white70, size: 44), const SizedBox(height: 12), Text(_videoOpenError ?? 'تعذّر تشغيل هذا الملف', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)), const SizedBox(height: 12), FilledButton.icon(onPressed: () { setState(() { _videoOpenError = null; ready = false; }); unawaited(_initializeVideo()); }, icon: const Icon(Icons.refresh), label: const Text('إعادة المحاولة'))]))) else const CircularProgressIndicator(color: coral),
       if (ready && _subtitleAt(v.position) != null) Positioned(bottom: 90, left: 20, right: 20, child: IgnorePointer(child: Text(_subtitleAt(v.position)!, textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: subtitleSize ?? 22, fontWeight: FontWeight.bold, shadows: const [Shadow(color: Colors.black, blurRadius: 5), Shadow(color: Colors.black, blurRadius: 10)])))),
       if (controls && !locked) Positioned.fill(child: DecoratedBox(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black87, Colors.transparent, Colors.black87], stops: [0, .5, 1])), child: SafeArea(child: Column(children: [
