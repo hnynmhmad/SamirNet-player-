@@ -563,6 +563,7 @@ jobs:
                           .setChannelId("smplayer_media_playback")
                           .setChannelName(R.string.app_name)
                           .setNotificationId(4301)
+                          .setSmallIcon(R.drawable.ic_stat_player)
                           .build()
                   )
                   player = ExoPlayer.Builder(this).build().apply {
