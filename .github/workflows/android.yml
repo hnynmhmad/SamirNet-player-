@@ -490,6 +490,32 @@ jobs:
               path.write_text(source)
           print('Verified Flutter method channel for native Media3 queue and transport controls.')
           PY
+      - name: Ensure Android media notification channel resources
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          values = Path('android/app/src/main/res/values')
+          values.mkdir(parents=True, exist_ok=True)
+          strings = values / 'strings.xml'
+          if strings.exists():
+              tree = ET.parse(strings)
+              root = tree.getroot()
+          else:
+              root = ET.Element('resources')
+              tree = ET.ElementTree(root)
+          if root.tag != 'resources':
+              raise SystemExit('Unexpected Android strings.xml root element')
+          app_name = root.find("string[@name='app_name']")
+          if app_name is None:
+              app_name = ET.SubElement(root, 'string', {'name': 'app_name'})
+          app_name.text = 'SM Player'
+          tree.write(strings, encoding='utf-8', xml_declaration=True)
+          ET.parse(strings)
+          print('Verified Android app_name resource for Media3 notification channel.')
+          PY
       - name: Add native AndroidX Media3 playback service
         shell: bash
         run: |
