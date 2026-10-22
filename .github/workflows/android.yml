@@ -426,7 +426,7 @@ jobs:
           else:
               needle = '\n    }\n}'
               insertion = r'''
-                  flutterEngine.platformViewsController.registry.registerViewFactory("com.samirnet.snplayer/video", SMPlayerVideoViewFactory())
+                  flutterEngine.platformViewsController.registry.registerViewFactory("com.samirnet.snplayer/video", SMPlayerVideoViewFactory(flutterEngine.dartExecutor.binaryMessenger))
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.samirnet.snplayer/media3")
                       .setMethodCallHandler { call, result ->
                           try {
@@ -726,33 +726,63 @@ jobs:
           video_view_path.write_text(r'''package com.samirnet.snplayer
 
           import android.content.Context
+          import android.view.MotionEvent
           import android.view.View
+          import android.widget.FrameLayout
           import androidx.media3.exoplayer.ExoPlayer
           import androidx.media3.ui.AspectRatioFrameLayout
           import androidx.media3.ui.PlayerView
+          import io.flutter.plugin.common.BinaryMessenger
+          import io.flutter.plugin.common.MethodChannel
           import io.flutter.plugin.common.StandardMessageCodec
           import io.flutter.plugin.platform.PlatformView
           import io.flutter.plugin.platform.PlatformViewFactory
 
-          class SMPlayerVideoViewFactory : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+          class SMPlayerVideoViewFactory(
+              private val messenger: BinaryMessenger
+          ) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
               override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
                   val player = SMPlayerMediaSessionService.currentPlayer()
                       ?: throw IllegalStateException("Media3 player must be initialized before creating its video view")
-                  return SMPlayerVideoPlatformView(context, player)
+                  return SMPlayerVideoPlatformView(context, player, messenger)
               }
           }
 
           private class SMPlayerVideoPlatformView(
               context: Context,
-              player: ExoPlayer
+              player: ExoPlayer,
+              messenger: BinaryMessenger
           ) : PlatformView {
+              private val events = MethodChannel(messenger, "com.samirnet.snplayer/video_view_events")
               private val playerView = PlayerView(context).apply {
                   this.player = player
                   useController = false
                   resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
               }
-              override fun getView(): View = playerView
-              override fun dispose() { playerView.player = null }
+              // Wrap PlayerView so every tap is observed before its SurfaceView child
+              // consumes the pointer sequence. Do not consume the event: playback
+              // remains native while Flutter reveals its overlay controls.
+              private val touchHost = object : FrameLayout(context) {
+                  init {
+                      addView(playerView, LayoutParams(
+                          LayoutParams.MATCH_PARENT,
+                          LayoutParams.MATCH_PARENT
+                      ))
+                  }
+
+                  override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                      if (event.actionMasked == MotionEvent.ACTION_UP) {
+                          events.invokeMethod("videoTap", null)
+                      }
+                      return super.dispatchTouchEvent(event)
+                  }
+              }
+
+              override fun getView(): View = touchHost
+              override fun dispose() {
+                  playerView.player = null
+                  events.setMethodCallHandler(null)
+              }
           }
           '''.replace('          ', ''))
 
