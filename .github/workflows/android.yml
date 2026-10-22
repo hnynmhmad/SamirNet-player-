@@ -242,6 +242,8 @@ jobs:
           source = '\n'.join(lines) + '\n'
           if activity.suffix == '.kt':
               for imp in [
+                  'import android.app.NotificationChannel',
+                  'import android.app.NotificationManager',
                   'import android.app.PictureInPictureParams',
                   'import android.os.Build',
                   'import android.os.Environment',
@@ -271,6 +273,20 @@ jobs:
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
+                  // Create the exact channel used by Media3 before any playback starts.
+                  // IMPORTANCE_LOW keeps media controls visible without sound or badges.
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val manager = getSystemService(NotificationManager::class.java)
+                      val channel = NotificationChannel(
+                          "smplayer_media_playback",
+                          getString(R.string.app_name),
+                          NotificationManager.IMPORTANCE_LOW
+                      ).apply {
+                          description = "Playback controls for SM Player"
+                          setShowBadge(false)
+                      }
+                      manager.createNotificationChannel(channel)
+                  }
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.samirnet.snplayer/pip")
                       .setMethodCallHandler { call, result ->
                           if (call.method != "enterPip") {
