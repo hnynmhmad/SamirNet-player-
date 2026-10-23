@@ -548,7 +548,10 @@ jobs:
           import android.content.Intent
           import android.net.Uri
           import android.os.Bundle
+          import android.os.Build
+          import android.content.pm.PackageManager
           import android.util.Log
+          import androidx.core.app.NotificationManagerCompat
           import androidx.media3.common.AudioAttributes
           import androidx.media3.common.C
           import androidx.media3.common.MediaItem
@@ -581,6 +584,10 @@ jobs:
                       .build()
                       .apply { setSmallIcon(R.drawable.ic_stat_player) }
                   setMediaNotificationProvider(notificationProvider)
+                  val notificationsEnabled = NotificationManagerCompat.from(this).areNotificationsEnabled()
+                  val postNotificationsGranted = Build.VERSION.SDK_INT < 33 ||
+                      checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED
+                  Log.i(TAG, "Notification diagnostics: enabled=$notificationsEnabled POST_NOTIFICATIONS=$postNotificationsGranted channel=smplayer_media_playback")
                   player = ExoPlayer.Builder(this).build().apply {
                       setAudioAttributes(
                           AudioAttributes.Builder()
@@ -634,7 +641,9 @@ jobs:
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
                   val action = intent?.getStringExtra(EXTRA_ACTION)
                   Log.i(TAG, "onStartCommand action=$action startId=$startId")
-                  val startResult = super.onStartCommand(intent, flags, startId)
+                  // For queue/play commands, update the player before Media3 computes
+                  // the foreground notification. STOP keeps the original ordering.
+                  val startResult = if (action == ACTION_STOP) super.onStartCommand(intent, flags, startId) else 0
                   when (action) {
                       ACTION_PLAY_QUEUE -> playQueue(intent)
                       ACTION_PLAY -> player.play()
@@ -652,7 +661,7 @@ jobs:
                       ACTION_SET_SHUFFLE -> player.shuffleModeEnabled = intent.getBooleanExtra(EXTRA_SHUFFLE, false)
                       ACTION_SET_VOLUME -> player.volume = intent.getFloatExtra(EXTRA_VOLUME, 1f).coerceIn(0f, 1f)
                   }
-                  return startResult
+                  return if (action == ACTION_STOP) startResult else super.onStartCommand(intent, flags, startId)
               }
 
               private fun playQueue(intent: Intent) {
