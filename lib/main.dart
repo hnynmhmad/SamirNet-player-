@@ -1360,10 +1360,47 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _activeVideoPointers.remove(event.pointer);
   }
 
+  Future<void> _checkNotificationAvailability() async {
+    if (!Platform.isAndroid || !mounted) return;
+    const channel = MethodChannel('com.samirnet.snplayer/notifications');
+    try {
+      var status = await channel.invokeMapMethod<String, dynamic>('getStatus') ?? <String, dynamic>{};
+      if (status['permissionGranted'] != true) {
+        await channel.invokeMethod<bool>('requestPermission');
+        status = await channel.invokeMapMethod<String, dynamic>('getStatus') ?? <String, dynamic>{};
+      }
+      if (!mounted) return;
+      final enabled = status['permissionGranted'] == true &&
+          status['notificationsEnabled'] == true &&
+          status['channelEnabled'] == true;
+      if (!enabled) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          duration: const Duration(seconds: 8),
+          content: const Text('إشعارات التحكم محظورة. فعّل إشعارات SM Player من إعدادات Android.'),
+          action: SnackBarAction(
+            label: 'فتح الإعدادات',
+            onPressed: () async {
+              try {
+                await channel.invokeMethod<bool>('openSettings');
+              } catch (error) {
+                debugPrint('Could not open notification settings: $error');
+              }
+            },
+          ),
+        ));
+      }
+    } catch (error, stack) {
+      debugPrint('Could not check Android notification availability: $error\\n$stack');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_checkNotificationAvailability());
+    });
     // AndroidView is a native platform view and may consume taps before the
     // enclosing Flutter GestureDetector sees them. The native view reports taps
     // over the actual video surface through this channel.
