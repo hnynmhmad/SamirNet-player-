@@ -1845,20 +1845,18 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
             IconButton(tooltip: 'ملء الشاشة / احتواء', onPressed: () => setState(() => fillScreen = !fillScreen), icon: Icon(fillScreen ? Icons.fit_screen : Icons.fullscreen, color: Colors.white)),
           ]),
           const SizedBox(height: 2),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              IconButton(tooltip: _repeat ? 'التكرار مفعّل' : 'تفعيل التكرار', onPressed: _toggleRepeat, style: IconButton.styleFrom(backgroundColor: _repeat ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.repeat_rounded, color: _repeat ? coral : Colors.white)),
-              IconButton(tooltip: _shuffle ? 'العشوائي مفعّل' : 'تشغيل عشوائي', onPressed: _toggleShuffle, style: IconButton.styleFrom(backgroundColor: _shuffle ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.shuffle_rounded, color: _shuffle ? coral : Colors.white)),
-            ]),
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              IconButton(tooltip: 'الفيديو السابق', onPressed: () => _navigatePlaylist(-1), icon: const Icon(Icons.skip_previous_rounded, color: Colors.white, size: 34)),
-              IconButton(tooltip: 'إرجاع 10 ثوانٍ', onPressed: () => _seek(-10), icon: const Icon(Icons.replay_rounded, color: Colors.white, size: 28)),
-              IconButton(tooltip: 'تشغيل / إيقاف', onPressed: () => v.isPlaying ? controller.pause() : controller.play(), icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white, size: 56)),
-              IconButton(tooltip: 'تقديم 10 ثوانٍ', onPressed: () => _seek(10), icon: const Icon(Icons.fast_forward_rounded, color: Colors.white, size: 28)),
-              IconButton(tooltip: 'الفيديو التالي', onPressed: () => _navigatePlaylist(1), icon: const Icon(Icons.skip_next_rounded, color: Colors.white, size: 34)),
-            ]),
-            IconButton(tooltip: _isFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة', onPressed: _toggleFavorite, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)),
-          ]),
+          LayoutBuilder(builder: (context, constraints) {
+            final compact = constraints.maxWidth < 520;
+            final iconSize = compact ? 27.0 : 32.0;
+            return Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+              IconButton(tooltip: _isFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة', onPressed: _toggleFavorite, iconSize: iconSize, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)),
+              IconButton(tooltip: 'الفيديو السابق', onPressed: () => _navigatePlaylist(-1), iconSize: iconSize, icon: const Icon(Icons.skip_previous_rounded, color: Colors.white)),
+              IconButton(tooltip: 'تشغيل / إيقاف مؤقت', onPressed: () => v.isPlaying ? controller.pause() : controller.play(), iconSize: compact ? 48 : 56, icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white)),
+              IconButton(tooltip: 'الفيديو التالي', onPressed: () => _navigatePlaylist(1), iconSize: iconSize, icon: const Icon(Icons.skip_next_rounded, color: Colors.white)),
+              IconButton(tooltip: _repeat ? 'التكرار مفعّل' : 'تفعيل تكرار الفيديو', onPressed: _toggleRepeat, iconSize: iconSize, style: IconButton.styleFrom(backgroundColor: _repeat ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.repeat_rounded, color: _repeat ? coral : Colors.white)),
+              IconButton(tooltip: _shuffle ? 'العشوائي مفعّل' : 'تشغيل عشوائي', onPressed: _toggleShuffle, iconSize: iconSize, style: IconButton.styleFrom(backgroundColor: _shuffle ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.shuffle_rounded, color: _shuffle ? coral : Colors.white)),
+            ]);
+          }),
         ])),
       ])))),
       if (_levelOverlayText != null) Positioned.fill(
