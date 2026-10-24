@@ -1252,8 +1252,47 @@ class FolderVideosScreen extends StatefulWidget {
   State<FolderVideosScreen> createState() => _FolderVideosScreenState();
 }
 class _FolderVideosScreenState extends State<FolderVideosScreen> {
-  bool grid = true;
+  bool grid = true, selecting = false, busy = false;
+  final Set<String> selected = <String>{};
   String sort = 'dateDesc';
+  void _toggleSelection(MediaEntry entry) {
+    setState(() { if (!selected.add(entry.id)) selected.remove(entry.id); selecting = selected.isNotEmpty; });
+  }
+  Future<void> _shareSelected() async {
+    setState(() => busy = true);
+    try {
+      final files = <XFile>[];
+      for (final entry in sortedEntries.where((e) => selected.contains(e.id))) {
+        final file = await entry.asset.file;
+        if (file != null) files.add(XFile(file.path, name: entry.name));
+      }
+      if (files.isEmpty) throw StateError('لا يمكن الوصول إلى الملفات المحددة');
+      await Share.shareXFiles(files, text: 'مشاركة من SM Player');
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذرت المشاركة: $error')));
+    } finally { if (mounted) setState(() => busy = false); }
+  }
+  Future<void> _sendSelected() async {
+    final entries = sortedEntries.where((e) => selected.contains(e.id)).toList();
+    if (entries.isNotEmpty) await Navigator.push(context, MaterialPageRoute(builder: (_) => InternalSendScreen(entries: entries)));
+  }
+  Future<void> _deleteSelected() async {
+    if (selected.isEmpty || busy) return;
+    final confirm = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
+      title: const Text('تأكيد حذف الفيديوهات'),
+      content: Text('هل تريد طلب حذف ${selected.length} فيديو؟ قد يطلب Android تأكيدًا إضافيًا.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('إلغاء')), FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('حذف'))],
+    ));
+    if (confirm != true || !mounted) return;
+    setState(() => busy = true);
+    try {
+      final ids = sortedEntries.where((e) => selected.contains(e.id)).map((e) => e.id).toList();
+      final deleted = await PhotoManager.editor.deleteWithIds(ids);
+      if (mounted) { setState(() { selected.clear(); selecting = false; }); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تم طلب حذف ${deleted.length} فيديو'))); }
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تعذر الحذف: $error')));
+    } finally { if (mounted) setState(() => busy = false); }
+  }
   @override
   void initState() { super.initState(); _loadViewPrefs(); }
   Future<void> _loadViewPrefs() async {
@@ -1273,7 +1312,11 @@ class _FolderVideosScreenState extends State<FolderVideosScreen> {
   Widget build(BuildContext context) => Directionality(
     textDirection: TextDirection.rtl,
     child: Scaffold(
-      appBar: AppBar(title: Text(widget.title), actions: [
+      appBar: AppBar(title: Text(selecting ? 'تم تحديد ${selected.length} فيديو' : widget.title), actions: [
+        if (selecting) IconButton(onPressed: busy ? null : _shareSelected, tooltip: 'مشاركة', icon: const Icon(Icons.share)),
+        if (selecting) IconButton(onPressed: busy ? null : _sendSelected, tooltip: 'إرسال', icon: const Icon(Icons.send_rounded)),
+        if (selecting) IconButton(onPressed: busy ? null : _deleteSelected, tooltip: 'حذف', icon: const Icon(Icons.delete_outline)),
+        if (selecting) IconButton(onPressed: () => setState(() { selected.clear(); selecting = false; }), tooltip: 'إلغاء التحديد', icon: const Icon(Icons.close)),
         IconButton(tooltip: grid ? 'عرض كقائمة' : 'عرض كشبكة', onPressed: () { setState(() => grid = !grid); _saveViewPrefs(); }, icon: Icon(grid ? Icons.view_list : Icons.grid_view)),
         PopupMenuButton<String>(tooltip: 'ترتيب الفيديوهات', icon: const Icon(Icons.sort), onSelected: (v) { setState(() => sort = v); _saveViewPrefs(); }, itemBuilder: (_) => const [
           PopupMenuItem(value: 'dateDesc', child: Text('الأحدث أولًا')),
@@ -1287,7 +1330,7 @@ class _FolderVideosScreenState extends State<FolderVideosScreen> {
       body: sortedEntries.isEmpty ? const Center(child: Text('لا توجد فيديوهات في هذا المجلد')) : grid
         ? GridView.builder(padding: const EdgeInsets.all(12), itemCount: sortedEntries.length, gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 240, crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: .8), itemBuilder: (context, index) {
             final entry = sortedEntries[index];
-            return Card(child: InkWell(onTap: () => widget.onPlay(entry), child: Column(children: [
+            return Card(child: InkWell(onTap: () { if (selecting) { _toggleSelection(entry); } else { widget.onPlay(entry); } }, onLongPress: () => _toggleSelection(entry), child: Column(children: [
               Expanded(child: Stack(fit: StackFit.expand, children: [
                 FutureBuilder<Uint8List?>(future: entry.asset.thumbnailDataWithSize(const ThumbnailSize(480,320)), builder: (_, snap) => snap.data == null ? const Center(child: Icon(Icons.movie_outlined, size: 40)) : Image.memory(snap.data!, fit: BoxFit.cover, width: double.infinity)),
                 Positioned(bottom: 6, right: 6, child: Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3), decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(5)), child: Text(_formatDuration(entry.duration), style: const TextStyle(color: Colors.white, fontSize: 11)))),
