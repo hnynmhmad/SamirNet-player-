@@ -1338,6 +1338,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   double? _videoDragPosition;
   bool _showTotalDuration = false;
   bool _handledVideoEnd = false;
+  Duration? _initialResumePosition;
+  bool _navigationInProgress = false;
   static const MethodChannel _videoViewEvents =
       MethodChannel('com.samirnet.snplayer/video_view_events');
   final Map<int, Offset> _activeVideoPointers = <int, Offset>{};
@@ -1348,11 +1350,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   void _onVideoPointerUp(PointerUpEvent event) {
     final start = _activeVideoPointers.remove(event.pointer);
-    // Listener receives raw pointer events before the gesture arena resolves,
-    // including events routed to AndroidView/SurfaceView. Ignore drags and pinch.
+    // Treat a simple tap as a toggle, but ignore drags and multi-touch gestures.
     if (start != null && _activeVideoPointers.isEmpty &&
         (event.localPosition - start).distance < 12 && !locked && mounted) {
-      _showControls();
+      _toggleControls();
     }
   }
 
@@ -1425,7 +1426,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     try {
       final prefs = await SharedPreferences.getInstance();
       _videoBackgroundModeEnabled = prefs.getBool('video_background_enabled_v1') ?? false;
-      final resumeMs = prefs.getInt('resume_${widget.entry.id}') ?? 0;
+      // Resume position is selected explicitly by the user from the history prompt.
+      final resumeMs = _initialResumePosition?.inMilliseconds ?? 0;
       // Load video modes before preparing the native player so UI state, the
       // Media3 repeat mode, and end-of-item navigation cannot race each other.
       final repeat = prefs.getBool('video_repeat_v1') ?? false;
@@ -1470,9 +1472,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (!mounted) return;
     if (controller.value.isEnded && !_handledVideoEnd) {
       _handledVideoEnd = true;
-      if (!_repeat && widget.playlist.length > 1) {
+      if (widget.playlist.length > 1) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) unawaited(_navigatePlaylist(1));
+          if (mounted) unawaited(_navigatePlaylist(1, randomize: _shuffle));
         });
       }
     }
@@ -1486,13 +1488,25 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _hideTimer?.cancel();
     if (controls && !locked && controller.value.isPlaying) {
       _hideTimer = Timer(const Duration(seconds: 3), () {
-        if (mounted) setState(() => controls = false);
+        if (mounted && controller.value.isPlaying && !locked) {
+          setState(() => controls = false);
+        }
       });
     }
   }
   void _showControls() {
+    if (!mounted) return;
     setState(() => controls = true);
     _scheduleHide();
+  }
+  void _toggleControls() {
+    if (!mounted || locked) return;
+    if (controls) {
+      _hideTimer?.cancel();
+      setState(() => controls = false);
+    } else {
+      _showControls();
+    }
   }
   Future<void> _loadSubtitle() async {
     final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['srt', 'vtt', 'txt']);
@@ -1764,50 +1778,33 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     }
   }
   Future<void> _navigatePlaylist(int direction, {bool randomize = false}) async {
-    if (widget.playlist.length < 2) return;
-    final int nextIndex;
-    if (randomize || _shuffle) {
-      final choices = List<int>.generate(widget.playlist.length, (i) => i).where((i) => i != _playlistIndex).toList()..shuffle();
-      nextIndex = choices.first;
-    } else {
-      nextIndex = (_playlistIndex + direction + widget.playlist.length) % widget.playlist.length;
-    }
-    final nextEntry = widget.playlist[nextIndex];
-
-    if (_videoBackgroundModeEnabled && _backgroundAudioActive) {
-      try {
-        final nextFile = nextEntry.id == widget.entry.id ? widget.file : await nextEntry.asset.file;
-        final handler = await getBackgroundAudioHandler();
-        if (nextFile != null && handler is SNBackgroundAudioHandler) {
-          // Stop the old screen's listener before changing the queue index so it
-          // cannot issue a duplicate navigation while the next screen is opening.
-          await _backgroundPlaybackSub?.cancel();
-          _backgroundPlaybackSub = null;
-          final switched = await handler.selectQueueItemByPath(nextFile.path);
-          if (!switched) {
-            final files = <File>[];
-            final titles = <String>[];
-            var targetIndex = 0;
-            for (final entry in widget.playlist) {
-              final file = entry.id == widget.entry.id ? widget.file : await entry.asset.file;
-              if (file == null) continue;
-              if (file.path == nextFile.path) targetIndex = files.length;
-              files.add(file);
-              titles.add(entry.name);
-            }
-            if (!files.any((file) => file.path == nextFile.path)) {
-              targetIndex = files.length;
-              files.add(nextFile);
-              titles.add(nextEntry.name);
-            }
-            await handler.playQueueInBackground(files, titles, targetIndex);
-          }
-        }
-      } catch (error) {
-        debugPrint('SamirNet could not switch the background queue to the next video: $error');
+    if (_navigationInProgress || widget.playlist.length < 2) return;
+    _navigationInProgress = true;
+    try {
+      final currentIndex = widget.playlist.indexWhere((entry) => entry.id == widget.entry.id);
+      final safeCurrentIndex = currentIndex < 0 ? _playlistIndex : currentIndex;
+      final int nextIndex;
+      if (randomize || _shuffle) {
+        final choices = List<int>.generate(widget.playlist.length, (i) => i)
+            .where((i) => i != safeCurrentIndex).toList()..shuffle();
+        if (choices.isEmpty) return;
+        nextIndex = choices.first;
+      } else {
+        nextIndex = (safeCurrentIndex + direction + widget.playlist.length) % widget.playlist.length;
       }
+      final nextEntry = widget.playlist[nextIndex];
+      // Do not change the native queue and Flutter route at the same time.
+      // The previous implementation raced two Media3 queue switches and could
+      // leave the native player blocked while the replacement screen initialized.
+      widget.onNavigate(nextEntry);
+    } catch (error, stack) {
+      debugPrint('Playlist navigation failed: $error\\n$stack');
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر تشغيل الفيديو التالي: $error')),
+      );
+    } finally {
+      _navigationInProgress = false;
     }
-    widget.onNavigate(nextEntry);
   }
   Future<void> _toggleRepeat() async {
     final next = !_repeat;
