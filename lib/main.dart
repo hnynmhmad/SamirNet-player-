@@ -1799,7 +1799,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         _levelOverlayText = '${seconds >= 0 ? '+' : '−'}${_time(Duration(seconds: seconds.abs()))}';
       });
       _overlayTimer?.cancel();
-      _overlayTimer = Timer(const Duration(milliseconds: 900), () { if (mounted) setState(() => _levelOverlayText = null); });
+      _overlayTimer = Timer(const Duration(milliseconds: 900), () {
+        if (mounted) {
+          setState(() => _levelOverlayText = null);
+        }
+      });
     }
   }
   Future<void> _navigatePlaylist(int direction, {bool randomize = false}) async {
