@@ -292,6 +292,26 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final p = await SharedPreferences.getInstance(); await p.setStringList('favorites', favorites.toList());
   }
   Future<void> _play(MediaEntry v) async {
+    Duration? resumePosition;
+    if (tab == 3) {
+      final prefs = await SharedPreferences.getInstance();
+      final savedMs = prefs.getInt('resume_${v.id}') ?? 0;
+      if (savedMs > 0 && mounted) {
+        final choice = await showDialog<String>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('متابعة مشاهدة الفيديو؟'),
+            content: Text('لديك موضع مشاهدة سابق عند ${_formatDuration(Duration(milliseconds: savedMs))}. هل تريد المتابعة منه أم البدء من البداية؟'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dialogContext, 'start'), child: const Text('من البداية')),
+              FilledButton(onPressed: () => Navigator.pop(dialogContext, 'resume'), child: const Text('متابعة المشاهدة')),
+            ],
+          ),
+        );
+        if (choice == null || !mounted) return;
+        resumePosition = choice == 'resume' ? Duration(milliseconds: savedMs) : Duration.zero;
+      }
+    }
     // Persisting history is best-effort only: a preferences/plugin error must
     // never prevent the user from opening a video.
     newMediaIds.remove(v.id);
@@ -306,13 +326,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
       debugPrint('Could not persist video history; continuing playback: $error\\n$stack');
     }
     if (!mounted) return;
-    await _openPlayer(v, replace: false);
+    final sourcePlaylist = (tab == 2 || tab == 3) ? shown : _sortEntries(videos, videoSort);
+    await _openPlayer(v, replace: false, playlistOverride: sourcePlaylist, initialPosition: resumePosition ?? Duration.zero);
     if (mounted) setState(() {});
   }
-  Future<void> _openPlayer(MediaEntry v, {required bool replace}) async {
+  Future<void> _openPlayer(MediaEntry v, {required bool replace, List<MediaEntry>? playlistOverride, Duration initialPosition = Duration.zero}) async {
     final file = await v.asset.file;
     if (file == null || !mounted) { _toast('تعذّر الوصول إلى الملف'); return; }
-    final page = MaterialPageRoute(builder: (_) => PlayerScreen(entry: v, file: file, favorite: favorites.contains(v.id), playlist: _sortEntries(videos, videoSort), onFavorite: () => _favorite(v), onNavigate: (next) => _openPlayer(next, replace: true)));
+    final sourcePlaylist = playlistOverride ?? ((tab == 2 || tab == 3) ? shown : _sortEntries(videos, videoSort));
+    final safePlaylist = sourcePlaylist.any((entry) => entry.id == v.id) ? sourcePlaylist : <MediaEntry>[...sourcePlaylist, v];
+    final page = MaterialPageRoute(builder: (_) => PlayerScreen(entry: v, file: file, favorite: favorites.contains(v.id), playlist: safePlaylist, initialPosition: initialPosition, onFavorite: () => _favorite(v), onNavigate: (next) => _openPlayer(next, replace: true, playlistOverride: safePlaylist)));
     if (replace) { await Navigator.pushReplacement(context, page); } else { await Navigator.push(context, page); }
   }
   Future<void> _reloadSharedViewPreference() async {
@@ -1302,10 +1325,11 @@ String _formatDuration(Duration d) {
 }
 
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({required this.entry, required this.file, required this.favorite, required this.onFavorite, required this.playlist, required this.onNavigate, super.key});
+  const PlayerScreen({required this.entry, required this.file, required this.favorite, required this.onFavorite, required this.playlist, required this.onNavigate, this.initialPosition = Duration.zero, super.key});
   final MediaEntry entry; final File file; final bool favorite; final VoidCallback onFavorite;
   final List<MediaEntry> playlist;
   final ValueChanged<MediaEntry> onNavigate;
+  final Duration initialPosition;
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
@@ -1412,6 +1436,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     });
     unawaited(_prepareBackgroundAudioHandler());
     _isFavorite = widget.favorite;
+    _initialResumePosition = widget.initialPosition;
     _loadVideoModes();
     _playlistIndex = widget.playlist.indexWhere((e) => e.id == widget.entry.id);
     if (_playlistIndex < 0) _playlistIndex = 0;
