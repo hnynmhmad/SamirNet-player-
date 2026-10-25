@@ -1972,7 +1972,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         ),
       ),
       if (locked) Positioned(left: 16, bottom: 32, child: IconButton.filledTonal(onPressed: () { setState(() { locked = false; controls = true; }); SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge); }, icon: const Icon(Icons.lock))),
-    ]))))));
+    ])))));
   }
 }
 
