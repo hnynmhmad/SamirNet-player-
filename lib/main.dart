@@ -1409,25 +1409,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   bool _navigationInProgress = false;
   static const MethodChannel _videoViewEvents =
       MethodChannel('com.samirnet.snplayer/video_view_events');
-  final Map<int, Offset> _activeVideoPointers = <int, Offset>{};
-
-  void _onVideoPointerDown(PointerDownEvent event) {
-    _activeVideoPointers[event.pointer] = event.localPosition;
-  }
-
-  void _onVideoPointerUp(PointerUpEvent event) {
-    final start = _activeVideoPointers.remove(event.pointer);
-    // Treat a simple tap as a toggle, but ignore drags and multi-touch gestures.
-    if (start != null && _activeVideoPointers.isEmpty &&
-        (event.localPosition - start).distance < 12 && !locked && mounted) {
-      _toggleControls();
-    }
-  }
-
-  void _onVideoPointerCancel(PointerCancelEvent event) {
-    _activeVideoPointers.remove(event.pointer);
-  }
-
   Future<void> _checkNotificationAvailability() async {
     if (!Platform.isAndroid || !mounted) return;
     const channel = MethodChannel('com.samirnet.snplayer/notifications');
