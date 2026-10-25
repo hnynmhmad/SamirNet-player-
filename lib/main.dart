@@ -1871,9 +1871,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       widget.onNavigate(nextEntry);
     } catch (error, stack) {
       debugPrint('Playlist navigation failed: $error\\n$stack');
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تعذر تشغيل الفيديو التالي: $error')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تعذر تشغيل الفيديو التالي: $error')),
+        );
+      }
     } finally {
       _navigationInProgress = false;
     }
