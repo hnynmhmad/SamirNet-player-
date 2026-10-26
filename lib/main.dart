@@ -1396,7 +1396,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   Timer? _overlayTimer;
   Timer? _hideTimer;
   StreamSubscription<PlaybackState>? _backgroundPlaybackSub;
-  SNBackgroundAudioHandler? _foregroundHandler;
+
   List<MediaEntry?> _backgroundQueueEntries = [];
   int? _lastBackgroundQueueIndex;
   int? _pendingBackgroundQueueIndex;
@@ -1496,7 +1496,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       );
       final handler = await getBackgroundAudioHandler();
       if (handler is SNBackgroundAudioHandler) {
-        _foregroundHandler = handler;
+
         _attachBackgroundPlaybackListener(handler);
       }
       if (mounted) {
