@@ -1814,7 +1814,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     // Do not stop the shared Media3 service when replacing one PlayerScreen
     // with another: the incoming screen has already queued its item. Stopping
     // here clears that new queue and causes the next screen to time out.
-    _videoViewEvents.setMethodCallHandler(null);
+    // The channel is shared across replacement PlayerScreen routes. The
+    // incoming screen installs its handler before this route is disposed, so
+    // clearing it here would disable taps on the newly opened video.
     controller.removeListener(_update);
     controller.dispose();
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
