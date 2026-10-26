@@ -1456,7 +1456,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     // over the actual video surface through this channel.
     _videoViewEvents.setMethodCallHandler((call) async {
       if (call.method == 'videoTap' && mounted && !locked) {
-        _toggleControls();
+        // A tap on the video surface should reveal/keep controls visible;
+        // auto-hide handles dismissal after inactivity. Never hide controls
+        // immediately because a second tap landed on another video area.
+        _showControls();
       }
     });
     unawaited(_prepareBackgroundAudioHandler());
@@ -1551,16 +1554,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     setState(() => controls = true);
     _scheduleHide();
   }
-  void _toggleControls() {
-    if (!mounted || locked) return;
-    if (controls) {
-      _hideTimer?.cancel();
-      setState(() => controls = false);
-    } else {
-      _showControls();
-    }
-  }
-
   void _keepControlsVisible() {
     if (!mounted || locked) return;
     if (!controls) setState(() => controls = true);
