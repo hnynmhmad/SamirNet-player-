@@ -291,7 +291,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     setState(() { if (!favorites.add(v.id)) favorites.remove(v.id); });
     final p = await SharedPreferences.getInstance(); await p.setStringList('favorites', favorites.toList());
   }
-  Future<void> _play(MediaEntry v) async {
+  Future<void> _play(MediaEntry v, {List<MediaEntry>? playlistOverride}) async {
     Duration? resumePosition;
     if (tab == 3) {
       final prefs = await SharedPreferences.getInstance();
@@ -326,7 +326,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       debugPrint('Could not persist video history; continuing playback: $error\\n$stack');
     }
     if (!mounted) return;
-    final sourcePlaylist = (tab == 2 || tab == 3) ? shown : _sortEntries(videos, videoSort);
+    final sourcePlaylist = playlistOverride ?? ((tab == 2 || tab == 3) ? shown : _sortEntries(videos, videoSort));
     await _openPlayer(v, replace: false, playlistOverride: sourcePlaylist, initialPosition: resumePosition ?? Duration.zero);
     if (mounted) setState(() {});
   }
@@ -528,7 +528,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       debugPrint('Could not persist seen folders; continuing navigation: $error\\n$stack');
     }
     if (!mounted) return;
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: _folderLabel(path), entries: entries, onPlay: _play, isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)));
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => FolderVideosScreen(title: _folderLabel(path), entries: entries, onPlay: (entry) => _play(entry, playlistOverride: entries), isFavorite: (v) => favorites.contains(v.id), onFavorite: _favorite)));
     try {
       final viewPrefs = await SharedPreferences.getInstance();
       final view = viewPrefs.getBool('global_media_grid') ?? true;
