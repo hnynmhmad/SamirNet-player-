@@ -18,6 +18,8 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
   final Map<String, AssetEntity> _selected = {};
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
   List<AssetEntity> _videos = [];
   List<AssetEntity> _audio = [];
   List<AssetPathEntity> _videoAlbums = [];
@@ -185,6 +187,7 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
 
   @override
   void dispose() {
+    _searchController.dispose();
     _tabs.dispose();
     super.dispose();
   }
@@ -224,6 +227,31 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
               if (_selected.isNotEmpty)
                 TextButton(onPressed: () => setState(_selected.clear), child: const Text('مسح')),
             ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+            child: TextField(
+              controller: _searchController,
+              textInputAction: TextInputAction.search,
+              onChanged: (value) => setState(() => _searchQuery = value.trim().toLowerCase()),
+              decoration: InputDecoration(
+                hintText: 'ابحث عن فيديو أو موسيقى بالاسم',
+                prefixIcon: const Icon(Icons.search_rounded, color: _pickerRed),
+                suffixIcon: _searchQuery.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'مسح البحث',
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                filled: true,
+                fillColor: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+              ),
+            ),
           ),
           if (_error != null)
             Padding(padding: const EdgeInsets.all(12), child: Text(_error!, style: const TextStyle(color: _pickerRed))),
@@ -275,7 +303,8 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
         Expanded(child: _assetList(_albumVideos, empty: 'هذا المجلد لا يحتوي على فيديوهات.')),
       ]);
     }
-    final albums = _videoAlbums.where((a) => !a.isAll && a.name.toLowerCase() != 'recent').toList();
+    final albums = _videoAlbums.where((a) => !a.isAll && a.name.toLowerCase() != 'recent' &&
+        (_searchQuery.isEmpty || a.name.toLowerCase().contains(_searchQuery))).toList();
     if (albums.isEmpty) return const Center(child: Text('لا توجد مجلدات فيديو.'));
     return ListView.separated(
       itemCount: albums.length,
@@ -312,15 +341,20 @@ class _TransferMediaPickerScreenState extends State<TransferMediaPickerScreen>
   }
 
   Widget _assetList(List<AssetEntity> assets, {required String empty}) {
-    if (assets.isEmpty) return Center(child: Text(empty));
+    final filteredAssets = _searchQuery.isEmpty
+        ? assets
+        : assets.where((asset) => (asset.title ?? '').toLowerCase().contains(_searchQuery)).toList();
+    if (filteredAssets.isEmpty) {
+      return Center(child: Text(_searchQuery.isEmpty ? empty : 'لا توجد نتائج تطابق «${_searchController.text.trim()}».'));
+    }
     return GridView.builder(
       padding: const EdgeInsets.all(10),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: .72,
       ),
-      itemCount: assets.length,
+      itemCount: filteredAssets.length,
       itemBuilder: (context, index) {
-        final asset = assets[index];
+        final asset = filteredAssets[index];
         final selected = _selected.containsKey(asset.id);
         return InkWell(
           borderRadius: BorderRadius.circular(12),
