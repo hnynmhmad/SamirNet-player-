@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
+import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -429,6 +430,7 @@ class _SendScreenState extends State<_SendScreen> {
           queryParameters: {'name': name},
         );
         if (mounted) setState(() => _status = 'إرسال $name');
+        final expectedDigest = (await sha256.bind(file.openRead()).first).toString();
         final request = await client.postUrl(uri);
         request.headers.set(HttpHeaders.authorizationHeader, 'Bearer ${target['token']}');
         request.headers.contentType = ContentType.binary;
@@ -442,6 +444,10 @@ class _SendScreenState extends State<_SendScreen> {
         final decoded = jsonDecode(body) as Map<String, dynamic>;
         if (decoded['saved'] != true || decoded['sha256'] is! String) {
           throw const HttpException('لم يؤكد جهاز الاستقبال سلامة الملف');
+        }
+        final receivedDigest = (decoded['sha256'] as String).toLowerCase();
+        if (receivedDigest != expectedDigest) {
+          throw const HttpException('فشل التحقق من سلامة الملف: بصمة SHA-256 غير متطابقة.');
         }
         if (mounted) setState(() => _sent++);
       }
