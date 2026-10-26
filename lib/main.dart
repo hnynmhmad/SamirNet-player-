@@ -1560,6 +1560,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _showControls();
     }
   }
+
+  void _keepControlsVisible() {
+    if (!mounted || locked) return;
+    if (!controls) setState(() => controls = true);
+    _scheduleHide();
+  }
   Future<void> _loadSubtitle() async {
     final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['srt', 'vtt', 'txt']);
     final path = picked?.files.singleOrNull?.path;
@@ -1805,10 +1811,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _hideTimer?.cancel();
     _overlayTimer?.cancel();
     _backgroundPlaybackSub?.cancel();
-    if (!_videoBackgroundModeEnabled) {
-      final handler = _foregroundHandler;
-      if (handler != null) unawaited(handler.stop());
-    }
+    // Do not stop the shared Media3 service when replacing one PlayerScreen
+    // with another: the incoming screen has already queued its item. Stopping
+    // here clears that new queue and causes the next screen to time out.
     _videoViewEvents.setMethodCallHandler(null);
     controller.removeListener(_update);
     controller.dispose();
@@ -1941,12 +1946,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
             final compact = constraints.maxWidth < 520;
             final iconSize = compact ? 27.0 : 32.0;
             return Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-              IconButton(tooltip: _isFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة', onPressed: _toggleFavorite, iconSize: iconSize, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)),
-              IconButton(tooltip: 'الفيديو السابق', onPressed: () => _navigatePlaylist(-1), iconSize: iconSize, icon: const Icon(Icons.skip_previous_rounded, color: Colors.white)),
-              IconButton(tooltip: 'تشغيل / إيقاف مؤقت', onPressed: () => v.isPlaying ? controller.pause() : controller.play(), iconSize: compact ? 48 : 56, icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white)),
-              IconButton(tooltip: 'الفيديو التالي', onPressed: () => _navigatePlaylist(1), iconSize: iconSize, icon: const Icon(Icons.skip_next_rounded, color: Colors.white)),
-              IconButton(tooltip: _repeat ? 'التكرار مفعّل' : 'تفعيل تكرار الفيديو', onPressed: _toggleRepeat, iconSize: iconSize, style: IconButton.styleFrom(backgroundColor: _repeat ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.repeat_rounded, color: _repeat ? coral : Colors.white)),
-              IconButton(tooltip: _shuffle ? 'العشوائي مفعّل' : 'تشغيل عشوائي', onPressed: _toggleShuffle, iconSize: iconSize, style: IconButton.styleFrom(backgroundColor: _shuffle ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.shuffle_rounded, color: _shuffle ? coral : Colors.white)),
+              IconButton(tooltip: _isFavorite ? 'إزالة من المفضلة' : 'إضافة إلى المفضلة', onPressed: () { _keepControlsVisible(); _toggleFavorite(); }, iconSize: iconSize, icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? coral : Colors.white)),
+              IconButton(tooltip: 'الفيديو السابق', onPressed: () { _keepControlsVisible(); unawaited(_navigatePlaylist(-1)); }, iconSize: iconSize, icon: const Icon(Icons.skip_previous_rounded, color: Colors.white)),
+              IconButton(tooltip: 'تشغيل / إيقاف مؤقت', onPressed: () { _keepControlsVisible(); unawaited(v.isPlaying ? controller.pause() : controller.play()); }, iconSize: compact ? 48 : 56, icon: Icon(v.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill, color: Colors.white)),
+              IconButton(tooltip: 'الفيديو التالي', onPressed: () { _keepControlsVisible(); unawaited(_navigatePlaylist(1)); }, iconSize: iconSize, icon: const Icon(Icons.skip_next_rounded, color: Colors.white)),
+              IconButton(tooltip: _repeat ? 'التكرار مفعّل' : 'تفعيل تكرار الفيديو', onPressed: () { _keepControlsVisible(); unawaited(_toggleRepeat()); }, iconSize: iconSize, style: IconButton.styleFrom(backgroundColor: _repeat ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.repeat_rounded, color: _repeat ? coral : Colors.white)),
+              IconButton(tooltip: _shuffle ? 'العشوائي مفعّل' : 'تشغيل عشوائي', onPressed: () { _keepControlsVisible(); unawaited(_toggleShuffle()); }, iconSize: iconSize, style: IconButton.styleFrom(backgroundColor: _shuffle ? coral.withOpacity(.22) : Colors.transparent), icon: Icon(Icons.shuffle_rounded, color: _shuffle ? coral : Colors.white)),
             ]);
           }),
         ])),
