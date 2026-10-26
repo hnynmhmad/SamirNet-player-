@@ -665,9 +665,10 @@ jobs:
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
                   val action = intent?.getStringExtra(EXTRA_ACTION)
                   Log.i(TAG, "onStartCommand action=$action startId=$startId")
-                  // For queue/play commands, update the player before Media3 computes
-                  // the foreground notification. STOP keeps the original ordering.
-                  val startResult = if (action == ACTION_STOP) super.onStartCommand(intent, flags, startId) else 0
+                  // Let MediaSessionService process the start immediately. In particular,
+                  // a startForegroundService() call must enter Media3's foreground/
+                  // notification lifecycle promptly on Android 8+.
+                  val startResult = super.onStartCommand(intent, flags, startId)
                   when (action) {
                       ACTION_PLAY_QUEUE -> playQueue(intent)
                       ACTION_PLAY -> player.play()
@@ -685,7 +686,7 @@ jobs:
                       ACTION_SET_SHUFFLE -> player.shuffleModeEnabled = intent.getBooleanExtra(EXTRA_SHUFFLE, false)
                       ACTION_SET_VOLUME -> player.volume = intent.getFloatExtra(EXTRA_VOLUME, 1f).coerceIn(0f, 1f)
                   }
-                  return if (action == ACTION_STOP) startResult else super.onStartCommand(intent, flags, startId)
+                  return startResult
               }
 
               private fun playQueue(intent: Intent) {
